@@ -1,5 +1,24 @@
-MadronaMPEnv is an experimental learning environment for training AI agents to play competitive multiplayer games with reinforcement learning. This environment is part of an ongoing research collaboration between Activision and the Graphics Lab at Stanford University. Currently, the codebase is an active work in progress; we plan to provide plug-and-play setup instructions in a future update.
+Need to install CUDA Toolkit (not just drivers!) 12.5 or 12.8 (12.6 will not work)
 
-This environment is built on top of the [Madrona Engine](https://madrona-engine.github.io), a prototype game engine for building high-performance learning environments that can execute at millions of frames per second by parallelizing gameplay logic on the GPU.
+To build this repo:
 
-The training code in this repo (scripts/jax\_train.py) depends on [JAX](https://github.com/jax-ml/jax), a deep-learning framework that allows us to train multiple neural network based agents simultaneously. These agents compete with each other, eventually developing emergent skills and strategies that lead to success.
+```
+pip install --upgrade "jax[cuda12_local]"
+git clone --recursive git@github.com:shacklettbp/madrona-learn.git
+cd madrona-learn
+pip install -e .
+
+cd ..
+
+git clone --recursive git@github.com:shacklettbp/madtrade.git
+cd madtrade
+
+mkdir build
+cmake -S. -Bbuild
+make -j build
+pip install -e .
+
+bash train.sh simple_run # this should make checkpoints in ckpts/simple_run
+
+```
+
