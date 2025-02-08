@@ -68,10 +68,13 @@ struct AgentPolicy {
 
 struct Action {
   OrderType type;
+  int32_t bid;
+  int32_t ask;
 };
 
 struct PlayerState {
   int32_t position;
+  int32_t dollars;
 };
 
 struct Order {
@@ -93,8 +96,13 @@ struct Agent : madrona::Archetype<
   AgentPolicy
 > {};
 
-struct Market {
+struct OrderList {
   Order orders[K];
+  AtomicI32 currentOrder;
+};
+
+struct Market {
+  OrderList orderLists[100];
 };
 
 struct TaskConfig {

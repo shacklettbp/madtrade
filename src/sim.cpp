@@ -126,8 +126,13 @@ inline void doneSystem(Engine &ctx,
 inline void actionsSystem(Engine &ctx,
                           Action action)
 {
-  (void)ctx;
-  (void)action;
+  Market &market = ctx.singleton<Market>();
+
+  // Take action, create order in Market singleton
+  
+  action.bid;
+
+  i32 order_idx = market.currentOrder.fetch_add_relaxed(1);
 }
 
 inline void fillOrderObservationsSystem(Engine &ctx,
@@ -137,6 +142,13 @@ inline void fillOrderObservationsSystem(Engine &ctx,
   (void)ctx;
   (void)player_state;
   (void)obs;
+
+
+  Market &market = ctx.singleton<Market>();
+
+  for (int i = 0; i < K; i++) {
+    obs.orders[i] = market.orders[i];
+  }
 }
 
 static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder, 
@@ -163,6 +175,12 @@ static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder,
 inline void matchOrdersSystem(Engine &ctx, Market &market)
 {
   (void)market;
+
+  // Iterate over the market and match orders??
+
+  for (int i = 0; i < K; i++) {
+    
+  }
 }
 
 static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
