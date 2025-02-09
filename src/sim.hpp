@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madrona/rand.hpp>
 #include <madrona/taskgraph.hpp>
 #include <madrona/taskgraph_builder.hpp>
 #include <madrona/custom_context.hpp>
@@ -8,6 +9,7 @@
 namespace madtrade {
 
 inline constexpr int32_t K = 10;
+inline constexpr uint32_t kMaxPrice = 100;
 
 class Engine;
 
@@ -33,8 +35,8 @@ enum class TaskGraphID : uint32_t {
 };
 
 enum class OrderType : uint32_t {
-  Buy,
-  Sell,
+  Ask,
+  Bid,
 };
 
 struct SimControl {
@@ -68,9 +70,35 @@ struct AgentPolicy {
 
 struct Action {
   OrderType type;
-  int32_t bid;
-  int32_t ask;
+  uint32_t dollars;
+  uint32_t size;
 };
+
+struct OrderInfo {
+  uint32_t price;
+  uint32_t size;
+  madrona::Entity issuer;
+};
+
+struct PlayerOrder {
+  OrderType type;
+  OrderInfo info;
+};
+
+// Used for sorting. This is either the price or the maxprice-price
+struct PriceKey {
+  uint32_t v;
+};
+
+struct Bid : madrona::Archetype<
+  PriceKey,
+  OrderInfo
+> {};
+
+struct Ask : madrona::Archetype<
+  PriceKey,
+  OrderInfo
+> {};
 
 struct PlayerState {
   int32_t position;
@@ -89,6 +117,7 @@ struct OrderObservation {
 
 struct Agent : madrona::Archetype<
   PlayerState,
+  PlayerOrder,
   OrderObservation,
   Action,
   Reward,
@@ -96,17 +125,13 @@ struct Agent : madrona::Archetype<
   AgentPolicy
 > {};
 
-struct OrderList {
-  Order orders[K];
-  AtomicI32 currentOrder;
-};
-
 struct Market {
-  OrderList orderLists[100];
+
 };
 
 struct TaskConfig {
   RewardHyperParams *rewardHyperParamsBuffer;
+  madrona::RandKey initRandKey;
 };
 
 // The Sim class encapsulates the per-world state of the simulation.
@@ -138,6 +163,8 @@ struct Sim : public madrona::WorldBase {
       const WorldInit &init);
 
   RewardHyperParams *rewardHyperParams;
+  madrona::RandKey initRandKey;
+  madrona::RNG rng;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

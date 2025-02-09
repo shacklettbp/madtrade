@@ -256,6 +256,8 @@ Manager::Impl * Manager::Impl::init(
 
   TaskConfig task_cfg {
     .rewardHyperParamsBuffer = reward_hyper_params,
+    // Temporarily just setting the seed to 0
+    .initRandKey = rand::initKey(0);
   };
 
   switch (mgr_cfg.execMode) {
