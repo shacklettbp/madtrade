@@ -154,9 +154,11 @@ struct WorldState {
   struct {
     uint32_t numAsks;
     OrderInfo *asks;
+    Entity *askHandles;
 
     uint32_t numBids;
     OrderInfo *bids;
+    Entity *bidHandles;
 
     uint32_t curAskOffset;
     uint32_t curBidOffset;
@@ -177,6 +179,15 @@ struct WorldState {
     }
   }
 
+  Entity getLowestAskHandle()
+  {
+    if (globalBook.numAsks == 0) {
+      return Entity::none();
+    } else {
+      return globalBook.askHandles[globalBook.curAskOffset];
+    }
+  }
+
   OrderInfo &getHighestBid()
   {
     if (globalBook.numBids == 0) {
@@ -186,16 +197,13 @@ struct WorldState {
     }
   }
 
-  void bumpAsk(Engine &ctx)
+  Entity getHighestBidHandle()
   {
-    ctx.destroyEntity(globalBook.asks[globalBook.curAskOffset]);
-    curAskOffset++;
-  }
-
-  void bumpBid(Engine &ctx)
-  {
-    ctx.destroyEntity(globalBook.bids[globalBook.curBidOffset]);
-    curBidOffset++;
+    if (globalBook.numBids == 0) {
+      return Entity::none();
+    } else {
+      return globalBook.bidHandles[globalBook.curBidOffset];
+    }
   }
 
   void updateWorldState(Engine &ctx)
@@ -275,10 +283,13 @@ static WorldState getWorldState(Engine &ctx)
   }
 
   Ask *asks = nullptr;
+  Entity *ask_handles = nullptr;
   uint32_t num_asks = 0;
   { // Get asks
     Ask *glob_asks = state_mgr->getArchetypeComponent<
       Ask, OrderInfo>();
+    Entity *glob_ask_hdls = state_mgr->getArchetypeComponent<
+      Ask, Entity>();
     int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
       Ask>();
     int32_t *world_counts = state_mgr->getArchetypeCounts<
@@ -289,6 +300,7 @@ static WorldState getWorldState(Engine &ctx)
   }
 
   Bid *bids = nullptr;
+  Entity *bid_handles = nullptr;
   uint32_t num_bids = 0;
   { // Get asks
     Bid *glob_bids = state_mgr->getArchetypeComponent<
