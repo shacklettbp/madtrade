@@ -74,6 +74,7 @@ static void cleanupWorld(Engine &ctx)
 
 static void initWorld(Engine &ctx)
 {
+  (void)ctx;
   // Do some initialization
 }
 
@@ -126,13 +127,11 @@ inline void doneSystem(Engine &ctx,
   done.done = 0;
 }
 
-inline void actionsSystem(Engine &ctx,
+inline void actionsSystem(Engine &,
                           Entity e,
                           Action action,
                           PlayerOrder &order)
 {
-  Market &market = ctx.singleton<Market>();
-
   // Set the current player order information
   order.type = action.type;
 
@@ -223,14 +222,13 @@ struct WorldState {
   }
 
   void addOrder(Engine &ctx,
-                Entity e,
                 PlayerOrder order)
   {
     switch (order.type) {
     case OrderType::Ask: {
       Entity ask = ctx.makeEntity<Ask>();
 
-      ctx.get<PriceKey>(ask).v = order.price;
+      ctx.get<PriceKey>(ask).v = order.info.price;
       ctx.get<OrderInfo>(ask) = order.info;
     } break;
 
@@ -238,7 +236,7 @@ struct WorldState {
       Entity bid = ctx.makeEntity<Bid>();
 
       // We want the highest bid to appear first
-      ctx.get<PriceKey>(bid).v = kMaxPrice - order.price;
+      ctx.get<PriceKey>(bid).v = kMaxPrice - order.info.price;
       ctx.get<OrderInfo>(bid) = order.info;
     } break;
     }
@@ -247,6 +245,8 @@ struct WorldState {
 
 static WorldState getWorldState(Engine &ctx)
 {
+  (void)ctx;
+
 #ifdef MADRONA_GPU_MODE
   StateManager *state_mgr = mwGPU::getStateManager();
   
@@ -339,7 +339,9 @@ static WorldState getWorldState(Engine &ctx)
 #else
   // TODO:
   assert(false);
-  return std::make_pair(nullptr, 0);
+  return {
+    // To do
+  };
 #endif
 }
 
@@ -351,7 +353,6 @@ static void genRandomPerm(Engine &ctx,
     uint32_t j = i + rand::sampleI32(
         ctx.data().initRandKey,
         0, num_elems - i);
-    uint32_t j = i + uniform(num_elems - i);
     std::swap(rand_perm[i], rand_perm[j]);
   }
 }
@@ -369,73 +370,75 @@ static bool executeTrade(OrderInfo &ask,
   traded_quantity = std::min(traded_quantity,
                              bidder_state.dollars / ask.price);
 
-  i_order.size -= traded_quantity;
-  glob_bid.size -= traded_quantity;
+  ask.size -= traded_quantity;
+  bid.size -= traded_quantity;
 
-  asker_state.dollars += traded_quantity * glob_bid.price;
-  bidder_state.dollars -= traded_quantity * glob_bid.price;
+  asker_state.dollars += traded_quantity * bid.price;
+  bidder_state.dollars -= traded_quantity * bid.price;
+
+  return (traded_quantity > 0);
 }
 
 inline void matchSystem(Engine &ctx,
-                        Market &market)
+                        Market &)
 {
   WorldState world_state = getWorldState(ctx);
 
   // Get a random permutation of current orders
   uint32_t *rand_perm = (uint32_t *)ctx.tmpAlloc(
-      sizeof(uint32_t) * num_orders);
-  genRandomPerm(ctx, rand_perm, num_orders);
+      sizeof(uint32_t) * world_state.numPlayerOrders);
+  genRandomPerm(ctx, rand_perm, world_state.numPlayerOrders);
 
-  for (int32_t i = 0; i < num_orders; ++i) {
+  for (int32_t i = 0; i < (int32_t)world_state.numPlayerOrders; ++i) {
     uint32_t i_agent_idx = rand_perm[i];
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
     PlayerState &i_state = world_state.playerStates[i_agent_idx];
 
-    for (int32_t j = (int32_t)agent_idx - 1; j >= 0; --j) {
+    for (int32_t j = (int32_t)i - 1; j >= 0; --j) {
       uint32_t j_agent_idx = rand_perm[j];
       PlayerOrder &j_order = world_state.playerOrders[j_agent_idx];
       PlayerState &j_state = world_state.playerStates[j_agent_idx];
 
-      if (i_order.type == j_order.type || j_order.size == 0) {
+      if (i_order.type == j_order.type || j_order.info.size == 0) {
         continue;
       }
 
       switch (i_order.type) {
       case OrderType::Ask: {
         // I is ask; J is bid
-        if (j_order.price > i_order.price) {
+        if (j_order.info.price > i_order.info.price) {
           // Check if the global book has a better trade
           OrderInfo &glob_bid = world_state.getHighestBid();
 
-          if (glob_bid.price > j_order.price) {
+          if (glob_bid.price > j_order.info.price) {
             PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
 
-            executeTrade(i_order, glob_bid,
+            executeTrade(i_order.info, glob_bid,
                 i_state, issuer_state);
 
             // Makes sure to clean up the global 
             world_state.updateWorldState(ctx);
           } else {
-            executeTrade(i_order, j_order,
+            executeTrade(i_order.info, j_order.info,
                 i_state, j_state);
           }
         }
       } break;
 
-      case OrderType::Bid {
-        if (j_order.price < i_order.price) {
+      case OrderType::Bid: {
+        if (j_order.info.price < i_order.info.price) {
           // Check if global book has a better trade
           OrderInfo &glob_ask = world_state.getLowestAsk();
 
-          if (glob_ask.price < j_order.price) {
+          if (glob_ask.price < j_order.info.price) {
             PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
 
-            executeTrade(glob_ask, i_order,
+            executeTrade(glob_ask, i_order.info,
                 issuer_state, i_state);
 
             world_state.updateWorldState(ctx);
           } else {
-            executeTrade(j_order, i_order,
+            executeTrade(j_order.info, i_order.info,
                 j_state, i_state);
           }
         }
@@ -446,7 +449,7 @@ inline void matchSystem(Engine &ctx,
 
   // Maybe it's still possible to trade against stuff in the global book
   // if going through the current orders didn't exhaust everything
-  for (uint32_t i = 0; i < num_orders; ++i) {
+  for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
     uint32_t i_agent_idx = rand_perm[i];
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
     PlayerState &i_state = world_state.playerStates[i_agent_idx];
@@ -458,10 +461,10 @@ inline void matchSystem(Engine &ctx,
       case OrderType::Ask: {
         OrderInfo &glob_bid = world_state.getHighestBid();
 
-        if (glob_bid.price > i_order.price) {
+        if (glob_bid.price > i_order.info.price) {
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
 
-          traded = executeTrade(i_order, glob_bid,
+          traded = executeTrade(i_order.info, glob_bid,
                        i_state, issuer_state);
 
           world_state.updateWorldState(ctx);
@@ -469,12 +472,12 @@ inline void matchSystem(Engine &ctx,
       } break;
 
       case OrderType::Bid: {
-        OrderInfo &glob_ask = world_state.getHighestAsk();
+        OrderInfo &glob_ask = world_state.getLowestAsk();
 
-        if (glob_ask.price < i_order.price) {
+        if (glob_ask.price < i_order.info.price) {
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
 
-          traded = executeTrade(glob_ask, i_order,
+          traded = executeTrade(glob_ask, i_order.info,
                        issuer_state, i_state);
 
           world_state.updateWorldState(ctx);
@@ -484,10 +487,9 @@ inline void matchSystem(Engine &ctx,
     } while (traded);
 
     // If the order still has stuff in it, push it to the end of the global book
-    if (i_order.size > 0) {
+    if (i_order.info.size > 0) {
       world_state.addOrder(
           ctx, 
-          world_state.issuerIDs[i_agent_idx],
           i_order);
     }
   }
@@ -500,13 +502,6 @@ inline void fillOrderObservationsSystem(Engine &ctx,
   (void)ctx;
   (void)player_state;
   (void)obs;
-
-
-  Market &market = ctx.singleton<Market>();
-
-  for (int i = 0; i < K; i++) {
-    obs.orders[i] = market.orders[i];
-  }
 }
 
 static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder, 
@@ -530,17 +525,6 @@ static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder,
   return obs_sys;
 }
 
-inline void matchOrdersSystem(Engine &ctx, Market &market)
-{
-  (void)market;
-
-  // Iterate over the market and match orders??
-
-  for (int i = 0; i < K; i++) {
-    
-  }
-}
-
 static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
   resetAndObsTasks(builder, cfg, {});
@@ -550,7 +534,9 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
   auto node = builder.addToGraph<ParallelForNode<Engine,
     actionsSystem,
-      Action
+      Entity,
+      Action,
+      PlayerOrder
     >>({});
 
 #ifdef MADRONA_GPU_MODE
