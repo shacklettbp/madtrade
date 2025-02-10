@@ -148,7 +148,6 @@ struct WorldState {
 
   uint32_t numPlayers;
   PlayerState *playerStates;
-  Entity *issuerIDs;
 
   struct {
     uint32_t numAsks;
@@ -243,92 +242,97 @@ struct WorldState {
   }
 };
 
+template <typename ArchetypeT, typename ComponentT>
+std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
+    StateManager * state_mgr,
+    uint32_t world_id)
+{
+#ifdef MADRONA_GPU_MODE
+  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
+    ArchetypeT, ComponentT>();
+  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
+    ArchetypeT>();
+  int32_t *world_counts = state_mgr->getArchetypeWorldCounts<
+    ArchetypeT>();
+
+  return std::make_pair(glob_comps + world_offsets[world_id],
+                        world_counts[world_id]);
+#else
+  ComponentT *comps = state_mgr->getWorldComponents<
+    ArchetypeT, ComponentT>(world_id);
+  uint32_t num_comps = (uint32_t)state_mgr->numRows<ArchetypeT>(world_id);
+
+  return std::make_pair(comps, num_comps);
+#endif
+}
+
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * getWorldComponents(
+    StateManager * state_mgr,
+    uint32_t world_id)
+{
+#ifdef MADRONA_GPU_MODE
+  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
+    ArchetypeT, ComponentT>();
+  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
+    ArchetypeT>();
+
+  return glob_comps + world_offsets[world_id];
+#else
+  ComponentT *comps = state_mgr->getWorldComponents<
+    ArchetypeT, ComponentT>(world_id);
+
+  return comps;
+#endif
+}
+
 static WorldState getWorldState(Engine &ctx)
 {
   (void)ctx;
 
+  // TODO: Provide a nicer unified API in the state manager to
+  // get a pointer to the components of an archetype in a single world.
+  //
+  // On the GPU backend, that means internally fetching the world offset
+  // instead of manually adding it yourself.
 #ifdef MADRONA_GPU_MODE
   StateManager *state_mgr = mwGPU::getStateManager();
+#else
+  StateManager *state_mgr = ctx.getStateManager();
+#endif
   
-  PlayerOrder *player_orders = nullptr;
-  uint32_t num_player_orders = 0;
-  { // Get player orders
-    PlayerOrder *glob_orders = state_mgr->getArchetypeComponent<
-      Agent, PlayerOrder>();
-    int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-      Agent>();
-    int32_t *world_counts = state_mgr->getArchetypeCounts<
-      Agent>();
+  auto [player_orders, num_player_orders] = getWorldComponentsAndCount<
+    Agent, PlayerOrder>(state_mgr, ctx.worldID().idx);
 
-    player_orders = glob_orders + world_offsets[ctx.worldID().idx];
-    num_player_orders = world_counts[ctx.worldID().idx];
-  }
+  auto [player_states, num_player_states] = getWorldComponentsAndCount<
+    Agent, PlayerState>(state_mgr, ctx.worldID().idx);
 
-  PlayerState *player_states = nullptr;
-  Entity *issuer_ids = nullptr;
-  uint32_t num_player_states = 0;
-  { // Get player orders
-    PlayerState *glob_states = state_mgr->getArchetypeComponent<
-      Agent, PlayerState>();
-    Entity *glob_ids = state_mgr->getArchetypeComponent<
-      Agent, Entity>();
-    int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-      Agent>();
-    int32_t *world_counts = state_mgr->getArchetypeCounts<
-      Agent>();
+  auto [asks, num_asks] = getWorldComponentsAndCount<
+    Ask, OrderInfo>(state_mgr, ctx.worldID().idx);
+  Entity *ask_handles = getWorldComponents<
+    Ask, Entity>(state_mgr, ctx.worldID().idx);
 
-    player_states = glob_states + world_offsets[ctx.worldID().idx];
-    issuer_ids = glob_ids + world_offsets[ctx.worldID().idx];
-    num_player_states = world_counts[ctx.worldID().idx];
-  }
-
-  Ask *asks = nullptr;
-  Entity *ask_handles = nullptr;
-  uint32_t num_asks = 0;
-  { // Get asks
-    Ask *glob_asks = state_mgr->getArchetypeComponent<
-      Ask, OrderInfo>();
-    Entity *glob_ask_hdls = state_mgr->getArchetypeComponent<
-      Ask, Entity>();
-    int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-      Ask>();
-    int32_t *world_counts = state_mgr->getArchetypeCounts<
-      Ask>();
-
-    asks = glob_asks + world_offsets[ctx.worldID().idx];
-    num_asks = world_counts[ctx.worldID().idx];
-  }
-
-  Bid *bids = nullptr;
-  Entity *bid_handles = nullptr;
-  uint32_t num_bids = 0;
-  { // Get asks
-    Bid *glob_bids = state_mgr->getArchetypeComponent<
-      Bid, OrderInfo>();
-    int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-      Bid>();
-    int32_t *world_counts = state_mgr->getArchetypeCounts<
-      Bid>();
-
-    bids = glob_bids + world_offsets[ctx.worldID().idx];
-    num_bids = world_counts[ctx.worldID().idx];
-  }
+  auto [bids, num_bids] = getWorldComponentsAndCount<
+    Bid, OrderInfo>(state_mgr, ctx.worldID().idx);
+  Entity *bid_handles = getWorldComponents<
+    Bid, Entity>(state_mgr, ctx.worldID().idx);
 
   return WorldState {
     // Current orders
     num_player_orders,
     player_orders,
 
-    num_players,
+    num_player_states,
     player_states,
-    issuer_ids,
 
     { // Global book info
       num_asks,
       asks,
+      ask_handles,
 
       num_bids,
       bids,
+      bid_handles,
 
       0, 0,
 
@@ -336,13 +340,6 @@ static WorldState getWorldState(Engine &ctx)
       OrderInfo { 0, 0, Entity::none() },
     },
   };
-#else
-  // TODO:
-  assert(false);
-  return {
-    // To do
-  };
-#endif
 }
 
 static void genRandomPerm(Engine &ctx,
@@ -539,20 +536,15 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
       PlayerOrder
     >>({});
 
-#ifdef MADRONA_GPU_MODE
   node = builder.addToGraph<SortArchetypeNode<
-    Ask, PriceKey>>();
-  node = builder.addToGraph<SortArchetypeNode<
-    Ask, WorldID>>();
+    Ask, PriceKey>>({node});
+  node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
 
   node = builder.addToGraph<SortArchetypeNode<
-    Bid, PriceKey>>();
-  node = builder.addToGraph<SortArchetypeNode<
-    Bid, WorldID>>();
+    Bid, PriceKey>>({node});
+  node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
 
-  node = builder.addToGraph<SortArchetypeNode<
-    Agent, WorldID>>();
-#endif
+  node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
 
   node = builder.addToGraph<ParallelForNode<Engine,
     matchSystem,
