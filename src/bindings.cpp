@@ -44,7 +44,8 @@ NB_MODULE(mad_trade, m) {
         .def("reward_tensor", &Manager::rewardTensor)
         .def("done_tensor", &Manager::doneTensor)
         .def("policy_assignment_tensor", &Manager::policyAssignmentTensor)
-        .def("orders_obs_tensor", &Manager::ordersObservationTensor)
+        .def("ask_orders_obs_tensor", &Manager::askOrdersObservationTensor)
+        .def("bid_orders_obs_tensor", &Manager::bidOrdersObservationTensor)
         .def("agent_obs_tensor", &Manager::agentStateObservationTensor)
         .def("jax", madrona::py::JAXInterface::buildEntry<
                 &Manager::trainInterface,

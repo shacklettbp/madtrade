@@ -22,7 +22,8 @@ enum class ExportID : uint32_t {
     Reward,
     Done,
     AgentPolicy,
-    OrdersObservation,
+    AskOrdersObservation,
+    BidOrdersObservation,
     AgentStateObservation,
 
     NumExports,
@@ -71,12 +72,12 @@ struct AgentPolicy {
 struct Action {
   OrderType type;
   uint32_t dollars;
-  uint32_t size;
+  int32_t size;
 };
 
 struct OrderInfo {
   uint32_t price;
-  uint32_t size;
+  int32_t size;
   madrona::Entity issuer;
 };
 
@@ -106,19 +107,23 @@ struct PlayerState {
 };
 
 struct Order {
-  OrderType type;
   int32_t size;
   uint32_t price;
 };
 
-struct OrderObservation {
+struct AskOrderObservation {
+  Order orders[K];
+};
+
+struct BidOrderObservation {
   Order orders[K];
 };
 
 struct Agent : madrona::Archetype<
   PlayerState,
   PlayerOrder,
-  OrderObservation,
+  AskOrderObservation,
+  BidOrderObservation,
   Action,
   Reward,
   Done,

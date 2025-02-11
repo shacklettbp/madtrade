@@ -37,7 +37,8 @@ void Sim::registerTypes(ECSRegistry &registry,
   registry.registerComponent<PriceKey>();
   registry.registerComponent<OrderInfo>();
 
-  registry.registerComponent<OrderObservation>();
+  registry.registerComponent<AskOrderObservation>();
+  registry.registerComponent<BidOrderObservation>();
 
   registry.registerArchetype<Agent>();
   registry.registerArchetype<Bid>();
@@ -61,8 +62,10 @@ void Sim::registerTypes(ECSRegistry &registry,
   registry.exportColumn<Agent, AgentPolicy>(
       (uint32_t)ExportID::AgentPolicy);
 
-  registry.exportColumn<Agent, OrderObservation>(
-      (uint32_t)ExportID::OrdersObservation);
+  registry.exportColumn<Agent, AskOrderObservation>(
+      (uint32_t)ExportID::AskOrdersObservation);
+  registry.exportColumn<Agent, BidOrderObservation>(
+      (uint32_t)ExportID::BidOrdersObservation);
   registry.exportColumn<Agent, PlayerState>(
       (uint32_t)ExportID::AgentStateObservation);
 }
@@ -494,11 +497,32 @@ inline void matchSystem(Engine &ctx,
 
 inline void fillOrderObservationsSystem(Engine &ctx,
                                         const PlayerState &player_state,
-                                        OrderObservation &obs)
+                                        AskOrderObservation &ask_obs,
+                                        BidOrderObservation &bid_obs)
 {
   (void)ctx;
   (void)player_state;
-  (void)obs;
+
+  // Every player will fill in top K orders from the book
+  WorldState world_state = getWorldState(ctx);
+
+  for (uint32_t i = 0;
+      i < std::min((uint32_t)K, world_state.globalBook.numAsks);
+      ++i) {
+    ask_obs.orders[i] = Order {
+      world_state.globalBook.asks[i].size,
+      world_state.globalBook.asks[i].price,
+    };
+  }
+
+  for (uint32_t i = 0;
+      i < std::min((uint32_t)K, world_state.globalBook.numBids);
+      ++i) {
+    bid_obs.orders[i] = Order {
+      world_state.globalBook.asks[i].size,
+      world_state.globalBook.asks[i].price,
+    };
+  }
 }
 
 static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder, 
@@ -516,7 +540,8 @@ static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder,
   auto obs_sys = builder.addToGraph<ParallelForNode<Engine,
     fillOrderObservationsSystem,
       PlayerState,
-      OrderObservation
+      AskOrderObservation,
+      BidOrderObservation
     >>({reset_sys});
 
   return obs_sys;
@@ -524,7 +549,16 @@ static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder,
 
 static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 {
-  resetAndObsTasks(builder, cfg, {});
+  auto node = builder.addToGraph<SortArchetypeNode<
+    Ask, PriceKey>>({});
+  node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
+
+  node = builder.addToGraph<SortArchetypeNode<
+    Bid, PriceKey>>({node});
+  node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
+  node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
+
+  resetAndObsTasks(builder, cfg, {node});
 }
 
 static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
@@ -536,6 +570,11 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
       PlayerOrder
     >>({});
 
+  node = builder.addToGraph<ParallelForNode<Engine,
+    matchSystem,
+      Market
+    >>({node});
+
   node = builder.addToGraph<SortArchetypeNode<
     Ask, PriceKey>>({node});
   node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
@@ -543,13 +582,7 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
   node = builder.addToGraph<SortArchetypeNode<
     Bid, PriceKey>>({node});
   node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
-
   node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
-
-  node = builder.addToGraph<ParallelForNode<Engine,
-    matchSystem,
-      Market
-    >>({node});
 
   node = builder.addToGraph<ParallelForNode<Engine,
     rewardSystem,
