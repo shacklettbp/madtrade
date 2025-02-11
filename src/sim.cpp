@@ -14,6 +14,25 @@
 using namespace madrona;
 using namespace madrona::math;
 
+namespace tutils {
+
+template <typename ArchetypeT, typename ComponentT>
+std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
+    StateManager * state_mgr,
+    uint32_t world_id);
+
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * getWorldComponents(
+    StateManager * state_mgr,
+    uint32_t world_id);
+
+template <typename ArchetypeT>
+Entity * getWorldEntities(
+    StateManager * state_mgr,
+    uint32_t world_id);
+  
+}
+
 namespace madtrade {
 
 // Register all the ECS components and archetypes that will be
@@ -72,13 +91,72 @@ void Sim::registerTypes(ECSRegistry &registry,
 
 static void cleanupWorld(Engine &ctx)
 {
-  (void)ctx;
+#ifdef MADRONA_GPU_MODE
+  StateManager *state_mgr = mwGPU::getStateManager();
+#else
+  StateManager *state_mgr = ctx.getStateManager();
+#endif
+
+  { // Destroy all agents
+    Entity *agents = tutils::getWorldEntities<Agent>(
+        state_mgr, ctx.worldID().idx);
+    for (uint32_t i = 0; i < ctx.data().numAgents; ++i) {
+      ctx.destroyEntity(agents[i]);
+    }
+  }
+
+  { // Destroy asks
+    auto [asks, num_asks] = tutils::getWorldComponentsAndCount<
+      Ask, OrderInfo>(state_mgr, ctx.worldID().idx);
+    Entity *ask_handles = tutils::getWorldEntities<
+      Ask>(state_mgr, ctx.worldID().idx);
+    (void)asks;
+
+    for (uint32_t i = 0; i < num_asks; ++i) {
+      ctx.destroyEntity(ask_handles[i]);
+    }
+  }
+
+  { // Destroy bids
+    auto [bids, num_bids] = tutils::getWorldComponentsAndCount<
+      Bid, OrderInfo>(state_mgr, ctx.worldID().idx);
+    Entity *bid_handles = tutils::getWorldEntities<
+      Bid>(state_mgr, ctx.worldID().idx);
+    (void)bids;
+
+    for (uint32_t i = 0; i < num_bids; ++i) {
+      ctx.destroyEntity(bid_handles[i]);
+    }
+  }
 }
 
 static void initWorld(Engine &ctx)
 {
-  (void)ctx;
-  // Do some initialization
+  uint32_t num_agents = ctx.data().numAgents;
+
+  for (uint32_t i = 0; i < num_agents; ++i) {
+    Entity a = ctx.makeEntity<Agent>();
+
+    ctx.get<PlayerState>(a) = {
+      .position = 0,
+      .dollars = 100,
+    };
+
+    ctx.get<PlayerOrder>(a) = {
+      .type = OrderType::None,
+      .info = {}
+    };
+
+    ctx.get<Reward>(a) = {
+      .v = 0.f
+    };
+
+    ctx.get<Done>(a) = {
+      .done = 0
+    };
+  }
+
+  ctx.singleton<WorldReset>().reset = 0;
 }
 
 inline void resetSystem(Engine &ctx, WorldReset &reset)
@@ -130,9 +208,9 @@ inline void doneSystem(Engine &ctx,
   done.done = 0;
 }
 
-inline void actionsSystem(Engine &,
+inline void actionsSystem(Engine &ctx,
                           Entity e,
-                          Action action,
+                          Action &action,
                           PlayerOrder &order)
 {
   // Set the current player order information
@@ -143,6 +221,12 @@ inline void actionsSystem(Engine &,
     .size = action.size,
     .issuer = e,
   };
+
+  printf("Agent (%d) placed order (%d); price = %d; size = %d\n",
+      ctx.loc(e).row,
+      (uint32_t)action.type,
+      order.info.price,
+      order.info.size);
 }
 
 struct WorldState {
@@ -241,53 +325,13 @@ struct WorldState {
       ctx.get<PriceKey>(bid).v = kMaxPrice - order.info.price;
       ctx.get<OrderInfo>(bid) = order.info;
     } break;
+
+    case OrderType::None: {
+      MADRONA_UNREACHABLE();
+    } break;
     }
   }
 };
-
-template <typename ArchetypeT, typename ComponentT>
-std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
-    StateManager * state_mgr,
-    uint32_t world_id)
-{
-#ifdef MADRONA_GPU_MODE
-  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
-    ArchetypeT, ComponentT>();
-  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-    ArchetypeT>();
-  int32_t *world_counts = state_mgr->getArchetypeWorldCounts<
-    ArchetypeT>();
-
-  return std::make_pair(glob_comps + world_offsets[world_id],
-                        world_counts[world_id]);
-#else
-  ComponentT *comps = state_mgr->getWorldComponents<
-    ArchetypeT, ComponentT>(world_id);
-  uint32_t num_comps = (uint32_t)state_mgr->numRows<ArchetypeT>(world_id);
-
-  return std::make_pair(comps, num_comps);
-#endif
-}
-
-template <typename ArchetypeT, typename ComponentT>
-ComponentT * getWorldComponents(
-    StateManager * state_mgr,
-    uint32_t world_id)
-{
-#ifdef MADRONA_GPU_MODE
-  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
-    ArchetypeT, ComponentT>();
-  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-    ArchetypeT>();
-
-  return glob_comps + world_offsets[world_id];
-#else
-  ComponentT *comps = state_mgr->getWorldComponents<
-    ArchetypeT, ComponentT>(world_id);
-
-  return comps;
-#endif
-}
 
 static WorldState getWorldState(Engine &ctx)
 {
@@ -304,21 +348,21 @@ static WorldState getWorldState(Engine &ctx)
   StateManager *state_mgr = ctx.getStateManager();
 #endif
   
-  auto [player_orders, num_player_orders] = getWorldComponentsAndCount<
+  auto [player_orders, num_player_orders] = tutils::getWorldComponentsAndCount<
     Agent, PlayerOrder>(state_mgr, ctx.worldID().idx);
 
-  auto [player_states, num_player_states] = getWorldComponentsAndCount<
+  auto [player_states, num_player_states] = tutils::getWorldComponentsAndCount<
     Agent, PlayerState>(state_mgr, ctx.worldID().idx);
 
-  auto [asks, num_asks] = getWorldComponentsAndCount<
+  auto [asks, num_asks] = tutils::getWorldComponentsAndCount<
     Ask, OrderInfo>(state_mgr, ctx.worldID().idx);
-  Entity *ask_handles = getWorldComponents<
-    Ask, Entity>(state_mgr, ctx.worldID().idx);
+  Entity *ask_handles = tutils::getWorldEntities<
+    Ask>(state_mgr, ctx.worldID().idx);
 
-  auto [bids, num_bids] = getWorldComponentsAndCount<
+  auto [bids, num_bids] = tutils::getWorldComponentsAndCount<
     Bid, OrderInfo>(state_mgr, ctx.worldID().idx);
-  Entity *bid_handles = getWorldComponents<
-    Bid, Entity>(state_mgr, ctx.worldID().idx);
+  Entity *bid_handles = tutils::getWorldEntities<
+    Bid>(state_mgr, ctx.worldID().idx);
 
   return WorldState {
     // Current orders
@@ -349,6 +393,10 @@ static void genRandomPerm(Engine &ctx,
                           uint32_t *rand_perm,
                           uint32_t num_elems)
 {
+  for (uint32_t i = 0; i < num_elems; ++i) {
+    rand_perm[i] = i;
+  }
+
   for (uint32_t i = 0; i <= num_elems - 2; ++i) {
     uint32_t j = i + rand::sampleI32(
         ctx.data().initRandKey,
@@ -380,8 +428,9 @@ static bool executeTrade(OrderInfo &ask,
 }
 
 inline void matchSystem(Engine &ctx,
-                        Market &)
+                        Market &market)
 {
+  (void)market;
   WorldState world_state = getWorldState(ctx);
 
   // Get a random permutation of current orders
@@ -400,6 +449,7 @@ inline void matchSystem(Engine &ctx,
       PlayerState &j_state = world_state.playerStates[j_agent_idx];
 
       if (i_order.type == j_order.type || j_order.info.size == 0) {
+        printf("orders are of same type, skipping\n");
         continue;
       }
 
@@ -413,12 +463,18 @@ inline void matchSystem(Engine &ctx,
           if (glob_bid.price > j_order.info.price) {
             PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
 
+            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+                ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
+
             executeTrade(i_order.info, glob_bid,
                 i_state, issuer_state);
 
             // Makes sure to clean up the global 
             world_state.updateWorldState(ctx);
           } else {
+            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d)\n",
+                j_agent_idx, i_agent_idx, i_order.info.price, i_order.info.size);
+
             executeTrade(i_order.info, j_order.info,
                 i_state, j_state);
           }
@@ -433,15 +489,25 @@ inline void matchSystem(Engine &ctx,
           if (glob_ask.price < j_order.info.price) {
             PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
 
+            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+                i_agent_idx, ctx.loc(glob_ask.issuer).row, glob_ask.price, glob_ask.size);
+
             executeTrade(glob_ask, i_order.info,
                 issuer_state, i_state);
 
             world_state.updateWorldState(ctx);
           } else {
+            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d)\n",
+                i_agent_idx, j_agent_idx, j_order.info.price, j_order.info.size);
+
             executeTrade(j_order.info, i_order.info,
                 j_state, i_state);
           }
         }
+      } break;
+
+      case OrderType::None: {
+        MADRONA_UNREACHABLE();
       } break;
       }
     }
@@ -483,11 +549,21 @@ inline void matchSystem(Engine &ctx,
           world_state.updateWorldState(ctx);
         }
       } break;
+
+      case OrderType::None: {
+        MADRONA_UNREACHABLE();
+      } break;
       }
     } while (traded);
 
     // If the order still has stuff in it, push it to the end of the global book
     if (i_order.info.size > 0) {
+      printf("Adding agent %d's order to the global book (type=%d; price=%d; size=%d)\n", 
+          i_agent_idx,
+          (uint32_t)i_order.type,
+          i_order.info.price,
+          i_order.info.size);
+
       world_state.addOrder(
           ctx, 
           i_order);
@@ -506,22 +582,28 @@ inline void fillOrderObservationsSystem(Engine &ctx,
   // Every player will fill in top K orders from the book
   WorldState world_state = getWorldState(ctx);
 
-  for (uint32_t i = 0;
-      i < std::min((uint32_t)K, world_state.globalBook.numAsks);
-      ++i) {
+  uint32_t to_cpy = std::min((uint32_t)K, world_state.globalBook.numAsks);
+  for (uint32_t i = 0; i < to_cpy; ++i) {
     ask_obs.orders[i] = Order {
       world_state.globalBook.asks[i].size,
       world_state.globalBook.asks[i].price,
     };
   }
 
-  for (uint32_t i = 0;
-      i < std::min((uint32_t)K, world_state.globalBook.numBids);
-      ++i) {
+  for (uint32_t i = to_cpy; i < K; ++i) {
+    ask_obs.orders[i] = Order { 0, 0 };
+  }
+
+  to_cpy = std::min((uint32_t)K, world_state.globalBook.numBids);
+  for (uint32_t i = 0; i < to_cpy; ++i) {
     bid_obs.orders[i] = Order {
       world_state.globalBook.asks[i].size,
       world_state.globalBook.asks[i].price,
     };
+  }
+
+  for (uint32_t i = to_cpy; i < K; ++i) {
+    bid_obs.orders[i] = Order { 0, 0 };
   }
 }
 
@@ -609,7 +691,8 @@ void Sim::setupTasks(TaskGraphManager &taskgraph_mgr, const TaskConfig &cfg)
 Sim::Sim(Engine &ctx,
          const TaskConfig &cfg,
          const WorldInit &)
-    : WorldBase(ctx)
+    : WorldBase(ctx),
+      numAgents(cfg.numAgents)
 {
   rewardHyperParams = cfg.rewardHyperParamsBuffer;
   initRandKey = cfg.initRandKey;
@@ -623,4 +706,72 @@ Sim::Sim(Engine &ctx,
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, TaskConfig, Sim::WorldInit);
 
+}
+
+namespace tutils {
+
+template <typename ArchetypeT, typename ComponentT>
+std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
+    StateManager * state_mgr,
+    uint32_t world_id)
+{
+#ifdef MADRONA_GPU_MODE
+  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
+    ArchetypeT, ComponentT>();
+  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
+    ArchetypeT>();
+  int32_t *world_counts = state_mgr->getArchetypeWorldCounts<
+    ArchetypeT>();
+
+  return std::make_pair(glob_comps + world_offsets[world_id],
+                        world_counts[world_id]);
+#else
+  ComponentT *comps = state_mgr->getWorldComponents<
+    ArchetypeT, ComponentT>(world_id);
+  uint32_t num_comps = (uint32_t)state_mgr->numRows<ArchetypeT>(world_id);
+
+  return std::make_pair(comps, num_comps);
+#endif
+}
+
+template <typename ArchetypeT, typename ComponentT>
+ComponentT * getWorldComponents(
+    StateManager * state_mgr,
+    uint32_t world_id)
+{
+#ifdef MADRONA_GPU_MODE
+  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
+    ArchetypeT, ComponentT>();
+  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
+    ArchetypeT>();
+
+  return glob_comps + world_offsets[world_id];
+#else
+  ComponentT *comps = state_mgr->getWorldComponents<
+    ArchetypeT, ComponentT>(world_id);
+
+  return comps;
+#endif
+}
+
+template <typename ArchetypeT>
+Entity * getWorldEntities(
+    StateManager * state_mgr,
+    uint32_t world_id)
+{
+#ifdef MADRONA_GPU_MODE
+  Entity *glob_comps = (Entity *)state_mgr->getArchetypeColumn<
+    ArchetypeT>(0);
+  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
+    ArchetypeT>();
+
+  return glob_comps + world_offsets[world_id];
+#else
+  Entity *comps = state_mgr->getWorldEntities<
+    ArchetypeT>(world_id);
+
+  return comps;
+#endif
+}
+  
 }

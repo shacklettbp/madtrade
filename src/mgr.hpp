@@ -60,6 +60,8 @@ public:
 
   madrona::ExecMode execMode() const;
 
+  void setAction(uint32_t world_id, uint32_t agent_id, Action action);
+
 private:
   struct Impl;
   struct CPUImpl;

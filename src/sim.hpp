@@ -17,6 +17,7 @@ class Engine;
 // for each component exported to the training code.
 enum class ExportID : uint32_t {
     Reset,
+    // TODO: This isn't filled
     MatchResult,
     Action,
     Reward,
@@ -38,6 +39,7 @@ enum class TaskGraphID : uint32_t {
 enum class OrderType : uint32_t {
   Ask,
   Bid,
+  None
 };
 
 struct SimControl {
@@ -137,6 +139,7 @@ struct Market {
 struct TaskConfig {
   RewardHyperParams *rewardHyperParamsBuffer;
   madrona::RandKey initRandKey;
+  uint32_t numAgents;
 };
 
 // The Sim class encapsulates the per-world state of the simulation.
@@ -170,6 +173,8 @@ struct Sim : public madrona::WorldBase {
   RewardHyperParams *rewardHyperParams;
   madrona::RandKey initRandKey;
   madrona::RNG rng;
+
+  uint32_t numAgents;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

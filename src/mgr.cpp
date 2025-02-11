@@ -56,6 +56,8 @@ struct Manager::Impl {
   virtual Tensor simControlTensor() const = 0;
 
   static inline Impl * init(const Config &cfg);
+
+  virtual Action * getActions() = 0;
 };
 
 struct Manager::CPUImpl final : Manager::Impl {
@@ -63,13 +65,16 @@ struct Manager::CPUImpl final : Manager::Impl {
       TaskGraphExecutor<Engine, Sim, TaskConfig, Sim::WorldInit>;
 
   TaskGraphT cpuExec;
+  Action *actions;
 
   inline CPUImpl(const Manager::Config &mgr_cfg,
                  SimControl *sim_ctrl,
                  RewardHyperParams *reward_hyper_params,
-                 TaskGraphT &&cpu_exec)
+                 TaskGraphT &&cpu_exec,
+                 Action *actions)
     : Impl(mgr_cfg, sim_ctrl, reward_hyper_params),
-      cpuExec(std::move(cpu_exec))
+      cpuExec(std::move(cpu_exec)),
+      actions(actions)
   {}
 
   inline virtual ~CPUImpl() final
@@ -117,6 +122,11 @@ struct Manager::CPUImpl final : Manager::Impl {
   {
     void *dev_ptr = cpuExec.getExported((uint32_t)slot);
     return Tensor(dev_ptr, type, dims, Optional<int>::none());
+  }
+
+  virtual Action * getActions() final
+  {
+    return actions;
   }
 };
 
@@ -186,6 +196,13 @@ struct Manager::CUDAImpl final : Manager::Impl {
   {
     void *dev_ptr = gpuExec.getExported((uint32_t)slot);
     return Tensor(dev_ptr, type, dims, cfg.gpuID);
+  }
+
+  virtual Action * getActions() final
+  {
+    // TODO: Implement
+    assert(false);
+    return nullptr;
   }
 };
 #endif
@@ -258,6 +275,7 @@ Manager::Impl * Manager::Impl::init(
     .rewardHyperParamsBuffer = reward_hyper_params,
     // Temporarily just setting the seed to 0
     .initRandKey = rand::initKey(0),
+    .numAgents = mgr_cfg.numAgentsPerWorld
   };
 
   switch (mgr_cfg.execMode) {
@@ -315,11 +333,15 @@ Manager::Impl * Manager::Impl::init(
           (CountT)TaskGraphID::NumGraphs,
       };
 
+      Action *actions = (Action *)cpu_exec.getExported(
+          (uint32_t)ExportID::Action);
+
       auto cpu_impl = new CPUImpl {
           mgr_cfg,
           sim_ctrl,
           reward_hyper_params,
           std::move(cpu_exec),
+          actions
       };
 
       return cpu_impl;
@@ -493,6 +515,20 @@ TrainInterface Manager::trainInterface() const
 ExecMode Manager::execMode() const
 {
   return impl_->cfg.execMode;
+}
+
+void Manager::setAction(
+    uint32_t world_id,
+    uint32_t agent_id,
+    Action action)
+{
+  if (impl_->cfg.execMode == ExecMode::CPU) {
+    Action *actions = impl_->getActions();
+
+    actions[world_id * impl_->numAgentsPerWorld + agent_id] = action;
+  } else {
+    assert(false);
+  }
 }
 
 }

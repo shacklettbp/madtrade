@@ -70,3 +70,11 @@ madrona_python_module(mad_trade
 target_link_libraries(mad_trade PRIVATE
     mad_trade_mgr
 )
+
+add_executable(mad_trade_test
+    test.cpp
+)
+
+target_link_libraries(mad_trade_test PRIVATE
+    mad_trade_mgr
+)
