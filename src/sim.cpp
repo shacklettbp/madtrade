@@ -555,6 +555,12 @@ inline void matchSystem(Engine &ctx,
       } break;
       }
     } while (traded);
+  }
+
+  for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
+    uint32_t i_agent_idx = rand_perm[i];
+    PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
+    PlayerState &i_state = world_state.playerStates[i_agent_idx];
 
     // If the order still has stuff in it, push it to the end of the global book
     if (i_order.info.size > 0) {
