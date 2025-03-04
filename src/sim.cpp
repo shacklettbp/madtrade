@@ -14,25 +14,6 @@
 using namespace madrona;
 using namespace madrona::math;
 
-namespace tutils {
-
-template <typename ArchetypeT, typename ComponentT>
-std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
-    StateManager * state_mgr,
-    uint32_t world_id);
-
-template <typename ArchetypeT, typename ComponentT>
-ComponentT * getWorldComponents(
-    StateManager * state_mgr,
-    uint32_t world_id);
-
-template <typename ArchetypeT>
-Entity * getWorldEntities(
-    StateManager * state_mgr,
-    uint32_t world_id);
-  
-}
-
 namespace madtrade {
 
 // Register all the ECS components and archetypes that will be
@@ -98,18 +79,18 @@ static void cleanupWorld(Engine &ctx)
 #endif
 
   { // Destroy all agents
-    Entity *agents = tutils::getWorldEntities<Agent>(
-        state_mgr, ctx.worldID().idx);
+    Entity *agents = state_mgr->getWorldEntities<Agent>(
+        ctx.worldID().idx);
     for (uint32_t i = 0; i < ctx.data().numAgents; ++i) {
       ctx.destroyEntity(agents[i]);
     }
   }
 
   { // Destroy asks
-    auto [asks, num_asks] = tutils::getWorldComponentsAndCount<
-      Ask, OrderInfo>(state_mgr, ctx.worldID().idx);
-    Entity *ask_handles = tutils::getWorldEntities<
-      Ask>(state_mgr, ctx.worldID().idx);
+    auto [asks, num_asks] = state_mgr->getWorldComponentsAndCount<
+      Ask, OrderInfo>(ctx.worldID().idx);
+    Entity *ask_handles = state_mgr->getWorldEntities<
+      Ask>(ctx.worldID().idx);
     (void)asks;
 
     for (uint32_t i = 0; i < num_asks; ++i) {
@@ -118,10 +99,10 @@ static void cleanupWorld(Engine &ctx)
   }
 
   { // Destroy bids
-    auto [bids, num_bids] = tutils::getWorldComponentsAndCount<
-      Bid, OrderInfo>(state_mgr, ctx.worldID().idx);
-    Entity *bid_handles = tutils::getWorldEntities<
-      Bid>(state_mgr, ctx.worldID().idx);
+    auto [bids, num_bids] = state_mgr->getWorldComponentsAndCount<
+      Bid, OrderInfo>(ctx.worldID().idx);
+    Entity *bid_handles = state_mgr->getWorldEntities<
+      Bid>(ctx.worldID().idx);
     (void)bids;
 
     for (uint32_t i = 0; i < num_bids; ++i) {
@@ -348,21 +329,21 @@ static WorldState getWorldState(Engine &ctx)
   StateManager *state_mgr = ctx.getStateManager();
 #endif
   
-  auto [player_orders, num_player_orders] = tutils::getWorldComponentsAndCount<
-    Agent, PlayerOrder>(state_mgr, ctx.worldID().idx);
+  auto [player_orders, num_player_orders] = state_mgr->getWorldComponentsAndCount<
+    Agent, PlayerOrder>(ctx.worldID().idx);
 
-  auto [player_states, num_player_states] = tutils::getWorldComponentsAndCount<
-    Agent, PlayerState>(state_mgr, ctx.worldID().idx);
+  auto [player_states, num_player_states] = state_mgr->getWorldComponentsAndCount<
+    Agent, PlayerState>(ctx.worldID().idx);
 
-  auto [asks, num_asks] = tutils::getWorldComponentsAndCount<
-    Ask, OrderInfo>(state_mgr, ctx.worldID().idx);
-  Entity *ask_handles = tutils::getWorldEntities<
-    Ask>(state_mgr, ctx.worldID().idx);
+  auto [asks, num_asks] = state_mgr->getWorldComponentsAndCount<
+    Ask, OrderInfo>(ctx.worldID().idx);
+  Entity *ask_handles = state_mgr->getWorldEntities<
+    Ask>(ctx.worldID().idx);
 
-  auto [bids, num_bids] = tutils::getWorldComponentsAndCount<
-    Bid, OrderInfo>(state_mgr, ctx.worldID().idx);
-  Entity *bid_handles = tutils::getWorldEntities<
-    Bid>(state_mgr, ctx.worldID().idx);
+  auto [bids, num_bids] = state_mgr->getWorldComponentsAndCount<
+    Bid, OrderInfo>(ctx.worldID().idx);
+  Entity *bid_handles = state_mgr->getWorldEntities<
+    Bid>(ctx.worldID().idx);
 
   return WorldState {
     // Current orders
@@ -712,72 +693,4 @@ Sim::Sim(Engine &ctx,
 
 MADRONA_BUILD_MWGPU_ENTRY(Engine, Sim, TaskConfig, Sim::WorldInit);
 
-}
-
-namespace tutils {
-
-template <typename ArchetypeT, typename ComponentT>
-std::pair<ComponentT *, uint32_t> getWorldComponentsAndCount(
-    StateManager * state_mgr,
-    uint32_t world_id)
-{
-#ifdef MADRONA_GPU_MODE
-  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
-    ArchetypeT, ComponentT>();
-  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-    ArchetypeT>();
-  int32_t *world_counts = state_mgr->getArchetypeWorldCounts<
-    ArchetypeT>();
-
-  return std::make_pair(glob_comps + world_offsets[world_id],
-                        world_counts[world_id]);
-#else
-  ComponentT *comps = state_mgr->getWorldComponents<
-    ArchetypeT, ComponentT>(world_id);
-  uint32_t num_comps = (uint32_t)state_mgr->numRows<ArchetypeT>(world_id);
-
-  return std::make_pair(comps, num_comps);
-#endif
-}
-
-template <typename ArchetypeT, typename ComponentT>
-ComponentT * getWorldComponents(
-    StateManager * state_mgr,
-    uint32_t world_id)
-{
-#ifdef MADRONA_GPU_MODE
-  ComponentT *glob_comps = state_mgr->getArchetypeComponent<
-    ArchetypeT, ComponentT>();
-  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-    ArchetypeT>();
-
-  return glob_comps + world_offsets[world_id];
-#else
-  ComponentT *comps = state_mgr->getWorldComponents<
-    ArchetypeT, ComponentT>(world_id);
-
-  return comps;
-#endif
-}
-
-template <typename ArchetypeT>
-Entity * getWorldEntities(
-    StateManager * state_mgr,
-    uint32_t world_id)
-{
-#ifdef MADRONA_GPU_MODE
-  Entity *glob_comps = (Entity *)state_mgr->getArchetypeColumn<
-    ArchetypeT>(0);
-  int32_t *world_offsets = state_mgr->getArchetypeWorldOffsets<
-    ArchetypeT>();
-
-  return glob_comps + world_offsets[world_id];
-#else
-  Entity *comps = state_mgr->getWorldEntities<
-    ArchetypeT>(world_id);
-
-  return comps;
-#endif
-}
-  
 }
