@@ -47,7 +47,7 @@ struct SimControl {
   int32_t someParamForChangingSimBehavior = 0;
 };
 
-enum class SimFlags : uint32_t {
+enum class GameFlags : uint32_t {
   InterpretAddAsReplace,
 };
 
@@ -116,8 +116,8 @@ struct PlayerState {
     // How many dollars would be left if all outstanding bids were filled
   int32_t dollarsIfBidsFilled;
 
-  Entity prevAsk;
-  Entity prevBid;
+  madrona::Entity prevAsk;
+  madrona::Entity prevBid;
 };
 
 struct Order {
@@ -188,7 +188,7 @@ struct Sim : public madrona::WorldBase {
 
   uint32_t numAgents;
 
-  SimFlags flags = SimFlags::InterpretAddAsReplace;
+  GameFlags flags = GameFlags::InterpretAddAsReplace;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {
