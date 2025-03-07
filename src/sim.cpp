@@ -427,6 +427,13 @@ static bool executeTrade(OrderInfo &ask,
   asker_state.dollars += traded_quantity * bid.price;
   bidder_state.dollars -= traded_quantity * bid.price;
 
+  // Update actual positions
+  asker_state.position -= traded_quantity;  // Seller loses position
+  bidder_state.position += traded_quantity; // Buyer gains position
+
+  // Don't update positionIfAsksFilled or dollarsIfBidsFilled here
+  // because these values already account for these orders being filled
+
   return (traded_quantity > 0);
 }
 
