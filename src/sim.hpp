@@ -110,7 +110,10 @@ struct Ask : madrona::Archetype<
 struct PlayerState {
   int32_t position;
   int32_t dollars;
+
+  // How many units would be left if all outstanding asks were filled
   int32_t positionIfAsksFilled;
+    // How many dollars would be left if all outstanding bids were filled
   int32_t dollarsIfBidsFilled;
 
   Entity prevAsk;

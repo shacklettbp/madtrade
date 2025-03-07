@@ -115,12 +115,19 @@ static void initWorld(Engine &ctx)
 {
   uint32_t num_agents = ctx.data().numAgents;
 
+  uint32_t start_position = 0;
+  uint32_t start_dollars = 100;
+
   for (uint32_t i = 0; i < num_agents; ++i) {
     Entity a = ctx.makeEntity<Agent>();
 
     ctx.get<PlayerState>(a) = {
-      .position = 0,
-      .dollars = 100,
+      .position = start_position,
+      .dollars = start_dollars,
+      .dollarsIfBidsFilled = start_dollars,
+      .positionIfAsksFilled = start_position,
+      .prevAsk = Entity::none(),
+      .prevBid = Entity::none(),
     };
 
     ctx.get<PlayerOrder>(a) = {
@@ -256,7 +263,7 @@ struct WorldState {
 
   OrderInfo &getHighestBid()
   {
-    if (globalGlook.curBidOffset >= globalBook.numBids) {
+    if (globalBook.curBidOffset >= globalBook.numBids) {
       return globalBook.dummyBid;
     } else {
       return globalBook.bids[globalBook.curBidOffset];
@@ -416,6 +423,7 @@ static bool executeTrade(OrderInfo &ask,
   ask.size -= traded_quantity;
   bid.size -= traded_quantity;
 
+  // Update actual balances
   asker_state.dollars += traded_quantity * bid.price;
   bidder_state.dollars -= traded_quantity * bid.price;
 
@@ -438,37 +446,48 @@ inline void matchSystem(Engine &ctx,
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
     PlayerState &i_state = world_state.playerStates[i_agent_idx];
 
-    // FIXME: Whenever we add or delete an order we need to update positionIfAsksFilled
-    // & dollarsIfBidsFilled.
     if (ctx.data().flags == SimFlags::InterpretAddAsReplace) {
-      // FIXME: Two things still need to happen here:
-      // If we're doing a bid or ask order, we need to check if we have one of those
-      // orders outstanding i_state.prevAsk / prevBid != Entity::none() and delete them
-      // In this case we also need to update dollarsIfBidsFilled / ask
+      // Handle replacement mode - cancel any existing orders first
       if (i_order.type == OrderType::Ask) {
         if (i_state.prevAsk != Entity::none()) {
-
-          Order &prev_order_state = ctx.get<Order>(i_state.prevOrder);
-          OrderInfo &prev_order_info = pre
-
-          if (prev_order_state.
-
-          prev_order_state.size = 0;
+          // Get the previous ask order info
+          OrderInfo &prev_order_info = ctx.get<OrderInfo>(i_state.prevAsk);
+          
+          // Add back the position that would have been sold
+          i_state.positionIfAsksFilled += prev_order_info.size;
+          
+          // Delete the old ask
+          prev_order_info.size = 0;
+          i_state.prevAsk = Entity::none();
+        }
+      } else if (i_order.type == OrderType::Bid) {
+        if (i_state.prevBid != Entity::none()) {
+          // Get the previous bid order info
+          OrderInfo &prev_order_info = ctx.get<OrderInfo>(i_state.prevBid);
+          
+          // Add back the dollars that would have been spent
+          i_state.dollarsIfBidsFilled += prev_order_info.size * prev_order_info.price;
+          prev_order_info.size = 0;
+          i_state.prevBid = Entity::none();
         }
       }
     }
 
-    { // Can we actually execute this order?
-      if (i_order.type == OrderType::Bid) {
-        if (i_order.info.size * i_order.info.price > i_state.dollarsIfBidsFilled) {
-          i_order.info.size = 0;
-          continue;
-        }
-      } else if (i_order.type == OrderType::Ask) {
-        if (i_order.info.size > i_state.positionIfAsksFilled) {
-          i_order.info.size = 0;
-          continue;
-        }
+    // Validate if order can be executed
+    if (i_order.type == OrderType::Bid) {
+      if (i_order.info.size * i_order.info.price > i_state.dollarsIfBidsFilled) {
+        i_order.info.size = 0;
+        continue;
+      }
+      // Update the state if the order is valid
+      i_state.dollarsIfBidsFilled -= i_order.info.size * i_order.info.price;
+    } else if (i_order.type == OrderType::Ask) {
+      if (i_order.info.size > i_state.positionIfAsksFilled) {
+        i_order.info.size = 0;
+        continue;
+      }
+      // Update the state if the order is valid
+      i_state.positionIfAsksFilled -= i_order.info.size;
     }
 
     while (i_order.size) {
@@ -558,6 +577,7 @@ inline void matchSystem(Engine &ctx,
     }
   }
 
+  // After going through all orders, add any remaining orders to the global book
   for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
     uint32_t i_agent_idx = rand_perm[i];
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
@@ -570,18 +590,28 @@ inline void matchSystem(Engine &ctx,
           (uint32_t)i_order.type,
           i_order.info.price,
           i_order.info.size);
+      Entity new_order = world_state.addOrder(ctx, i_order);
 
-      i_state.prevOrder = world_state.addOrder(
-          ctx, 
-          i_order);
+      // Store reference to the order
+      if (i_order.type == OrderType::Ask) {
+        if (ctx.data().flags == SimFlags::InterpretAddAsReplace) {
+          assert(i_state.prevAsk == Entity::none());
+        }
+        i_state.prevAsk = new_order;
+      } else if (i_order.type == OrderType::Bid) {
+        if (ctx.data().flags == SimFlags::InterpretAddAsReplace) {
+          assert(i_state.prevBid == Entity::none());
+        }
+        i_state.prevBid = new_order;
+      }
     }
   }
 }
 
 inline void fillOrderObservationsSystem(Engine &ctx,
-                                        const PlayerState &player_state,
-                                        AskOrderObservation &ask_obs,
-                                        BidOrderObservation &bid_obs)
+                                      const PlayerState &player_state,
+                                      AskOrderObservation &ask_obs,
+                                      BidOrderObservation &bid_obs)
 {
   (void)ctx;
   (void)player_state;
@@ -589,6 +619,7 @@ inline void fillOrderObservationsSystem(Engine &ctx,
   // Every player will fill in top K orders from the book
   WorldState world_state = getWorldState(ctx);
 
+  // Fill ask observations
   uint32_t to_cpy = std::min((uint32_t)K, world_state.globalBook.numAsks);
   for (uint32_t i = 0; i < to_cpy; ++i) {
     ask_obs.orders[i] = Order {
@@ -596,19 +627,18 @@ inline void fillOrderObservationsSystem(Engine &ctx,
       world_state.globalBook.asks[i].price,
     };
   }
-
   for (uint32_t i = to_cpy; i < K; ++i) {
     ask_obs.orders[i] = Order { 0, 0 };
   }
 
+  // Fill bid observations
   to_cpy = std::min((uint32_t)K, world_state.globalBook.numBids);
   for (uint32_t i = 0; i < to_cpy; ++i) {
     bid_obs.orders[i] = Order {
-      world_state.globalBook.asks[i].size,
-      world_state.globalBook.asks[i].price,
+      world_state.globalBook.bids[i].size,
+      world_state.globalBook.bids[i].price,
     };
   }
-
   for (uint32_t i = to_cpy; i < K; ++i) {
     bid_obs.orders[i] = Order { 0, 0 };
   }
