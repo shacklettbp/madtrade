@@ -275,7 +275,8 @@ Manager::Impl * Manager::Impl::init(
     .rewardHyperParamsBuffer = reward_hyper_params,
     // Temporarily just setting the seed to 0
     .initRandKey = rand::initKey(0),
-    .numAgents = mgr_cfg.numAgentsPerWorld
+    .numAgents = mgr_cfg.numAgentsPerWorld,
+    .simFlags = mgr_cfg.simFlags,
   };
 
   switch (mgr_cfg.execMode) {

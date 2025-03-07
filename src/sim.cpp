@@ -453,7 +453,7 @@ inline void matchSystem(Engine &ctx,
     printf("\n[i loop] Agent (%d) has order (%s; price=%d; size=%d)\n", i_agent_idx, i_order.type == OrderType::Ask ? "ask" : "bid", i_order.info.price, i_order.info.size);
     // printf("Current state of agent (%d): dollars = %d; position = %d; dollarsIfBidsFilled = %d; positionIfAsksFilled = %d\n", i_agent_idx, i_state.dollars, i_state.position, i_state.dollarsIfBidsFilled, i_state.positionIfAsksFilled);
 
-    if (ctx.data().flags == GameFlags::InterpretAddAsReplace) {
+    if (ctx.data().simFlags == SimFlags::InterpretAddAsReplace) {
       // Handle replacement mode - cancel any existing orders first
       if (i_order.type == OrderType::Ask) {
         if (i_state.prevAsk != Entity::none()) {
@@ -632,12 +632,12 @@ inline void matchSystem(Engine &ctx,
 
       // Store reference to the order
       if (i_order.type == OrderType::Ask) {
-        if (ctx.data().flags == GameFlags::InterpretAddAsReplace) {
+        if (ctx.data().simFlags == SimFlags::InterpretAddAsReplace) {
           assert(i_state.prevAsk == Entity::none());
         }
         i_state.prevAsk = new_order;
       } else if (i_order.type == OrderType::Bid) {
-        if (ctx.data().flags == GameFlags::InterpretAddAsReplace) {
+        if (ctx.data().simFlags == SimFlags::InterpretAddAsReplace) {
           assert(i_state.prevBid == Entity::none());
         }
         i_state.prevBid = new_order;
@@ -767,7 +767,8 @@ Sim::Sim(Engine &ctx,
          const TaskConfig &cfg,
          const WorldInit &)
     : WorldBase(ctx),
-      numAgents(cfg.numAgents)
+      numAgents(cfg.numAgents),
+      simFlags(cfg.simFlags)
 {
   rewardHyperParams = cfg.rewardHyperParamsBuffer;
   initRandKey = cfg.initRandKey;

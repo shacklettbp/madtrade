@@ -14,6 +14,7 @@ int main(int argc, char *argv[])
     .execMode = ExecMode::CPU,
     .numWorlds = 1,
     .numAgentsPerWorld = 4,
+    .simFlags = SimFlags::InterpretAddAsReplace,
   });
 
   // Initialize simulation

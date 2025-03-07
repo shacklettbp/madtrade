@@ -5,6 +5,7 @@
 #include <madrona/taskgraph_builder.hpp>
 #include <madrona/custom_context.hpp>
 #include <madrona/components.hpp>
+#include "sim_flags.hpp"
 
 namespace madtrade {
 
@@ -45,10 +46,6 @@ enum class OrderType : uint32_t {
 struct SimControl {
   // Useful for changing sim behavior for train vs eval
   int32_t someParamForChangingSimBehavior = 0;
-};
-
-enum class GameFlags : uint32_t {
-  InterpretAddAsReplace,
 };
 
 struct WorldReset {
@@ -152,6 +149,7 @@ struct TaskConfig {
   RewardHyperParams *rewardHyperParamsBuffer;
   madrona::RandKey initRandKey;
   uint32_t numAgents;
+  SimFlags simFlags;
 };
 
 // The Sim class encapsulates the per-world state of the simulation.
@@ -187,8 +185,7 @@ struct Sim : public madrona::WorldBase {
   madrona::RNG rng;
 
   uint32_t numAgents;
-
-  GameFlags flags = GameFlags::InterpretAddAsReplace;
+  SimFlags simFlags;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {
