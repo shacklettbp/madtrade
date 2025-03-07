@@ -501,6 +501,7 @@ inline void matchSystem(Engine &ctx,
       i_state.positionIfAsksFilled -= i_order.info.size;
     }
 
+    bool didExecute = false;
     while (i_order.info.size) {
       // First, find the best order of new orders not in the book yet from prior players in the ordering
       int32_t best_trade_idx = -1;
@@ -560,6 +561,7 @@ inline void matchSystem(Engine &ctx,
 
           // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
+          didExecute = true;
         } else {
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
           PlayerState &other_state = world_state.playerStates[best_trade_idx];
@@ -569,6 +571,7 @@ inline void matchSystem(Engine &ctx,
 
           executeTrade(i_order.info, other_order.info,
                        i_state, other_state);
+          didExecute = true;
         }
       } else if (i_order.type == OrderType::Bid) {
         if (best_price > i_order.info.price) {
@@ -588,6 +591,7 @@ inline void matchSystem(Engine &ctx,
 
           // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
+          didExecute = true;
         } else {
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
           PlayerState &other_state = world_state.playerStates[best_trade_idx];
@@ -597,14 +601,19 @@ inline void matchSystem(Engine &ctx,
 
           executeTrade(other_order.info, i_order.info,
                        other_state, i_state);
+          didExecute = true;
         }
       } else {
         assert(false);
       }
     }
+
+    if (!didExecute) {
+      printf("[No match] Agent %d's order was not executed\n", i_agent_idx);
+    }
   }
 
-  printf("[matchSystem] Done with i loop\n");
+  printf("\n[matchSystem] Done with i loop\n\n");
 
   // After going through all orders, add any remaining orders to the global book
   for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
