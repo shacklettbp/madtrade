@@ -47,6 +47,10 @@ struct SimControl {
   int32_t someParamForChangingSimBehavior = 0;
 };
 
+enum class SimFlags : uint32_t {
+  InterpretAddAsReplace,
+};
+
 struct WorldReset {
   int32_t reset;
 };
@@ -106,6 +110,11 @@ struct Ask : madrona::Archetype<
 struct PlayerState {
   int32_t position;
   int32_t dollars;
+  int32_t positionIfAsksFilled;
+  int32_t dollarsIfBidsFilled;
+
+  Entity prevAsk;
+  Entity prevBid;
 };
 
 struct Order {
@@ -175,6 +184,8 @@ struct Sim : public madrona::WorldBase {
   madrona::RNG rng;
 
   uint32_t numAgents;
+
+  SimFlags flags = SimFlags::InterpretAddAsReplace;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

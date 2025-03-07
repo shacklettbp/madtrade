@@ -247,7 +247,7 @@ struct WorldState {
 
   Entity getLowestAskHandle()
   {
-    if (globalBook.numAsks == 0) {
+    if (globalBook.curAskOffset >= globalBook.numAsks) {
       return Entity::none();
     } else {
       return globalBook.askHandles[globalBook.curAskOffset];
@@ -256,7 +256,7 @@ struct WorldState {
 
   OrderInfo &getHighestBid()
   {
-    if (globalBook.numBids == 0) {
+    if (globalGlook.curBidOffset >= globalBook.numBids) {
       return globalBook.dummyBid;
     } else {
       return globalBook.bids[globalBook.curBidOffset];
@@ -272,23 +272,33 @@ struct WorldState {
     }
   }
 
+  // TODO: Find better name
   void updateWorldState(Engine &ctx)
   {
-    OrderInfo &lowest_ask = getLowestAsk();
-    OrderInfo &highest_bid = getHighestBid();
+    while (true) {
+      OrderInfo &lowest_ask = getLowestAsk();
 
-    if (lowest_ask.size == 0) {
-      ctx.destroyEntity(lowest_ask.issuer);
-      globalBook.curAskOffset++;
+      if (lowest_ask.size == 0) {
+        ctx.destroyEntity(lowest_ask.issuer);
+        globalBook.curAskOffset++;
+      } else {
+        break;
+      }
     }
 
-    if (highest_bid.size == 0) {
-      ctx.destroyEntity(highest_bid.issuer);
-      globalBook.curBidOffset++;
+    while (true) {
+      OrderInfo &highest_bid = getHighestBid();
+
+      if (highest_bid.size == 0) {
+        ctx.destroyEntity(highest_bid.issuer);
+        globalBook.curBidOffset++;
+      } else {
+        break;
+      }
     }
   }
 
-  void addOrder(Engine &ctx,
+  Entity addOrder(Engine &ctx,
                 PlayerOrder order)
   {
     switch (order.type) {
@@ -297,6 +307,8 @@ struct WorldState {
 
       ctx.get<PriceKey>(ask).v = order.info.price;
       ctx.get<OrderInfo>(ask) = order.info;
+
+      return ask;
     } break;
 
     case OrderType::Bid: {
@@ -305,6 +317,8 @@ struct WorldState {
       // We want the highest bid to appear first
       ctx.get<PriceKey>(bid).v = kMaxPrice - order.info.price;
       ctx.get<OrderInfo>(bid) = order.info;
+
+      return bid;
     } break;
 
     case OrderType::None: {
@@ -424,118 +438,124 @@ inline void matchSystem(Engine &ctx,
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
     PlayerState &i_state = world_state.playerStates[i_agent_idx];
 
-    for (int32_t j = (int32_t)i - 1; j >= 0; --j) {
-      uint32_t j_agent_idx = rand_perm[j];
-      PlayerOrder &j_order = world_state.playerOrders[j_agent_idx];
-      PlayerState &j_state = world_state.playerStates[j_agent_idx];
+    // FIXME: Whenever we add or delete an order we need to update positionIfAsksFilled
+    // & dollarsIfBidsFilled.
+    if (ctx.data().flags == SimFlags::InterpretAddAsReplace) {
+      // FIXME: Two things still need to happen here:
+      // If we're doing a bid or ask order, we need to check if we have one of those
+      // orders outstanding i_state.prevAsk / prevBid != Entity::none() and delete them
+      // In this case we also need to update dollarsIfBidsFilled / ask
+      if (i_order.type == OrderType::Ask) {
+        if (i_state.prevAsk != Entity::none()) {
 
-      if (i_order.type == j_order.type || j_order.info.size == 0) {
-        printf("orders are of same type, skipping\n");
-        continue;
-      }
+          Order &prev_order_state = ctx.get<Order>(i_state.prevOrder);
+          OrderInfo &prev_order_info = pre
 
-      switch (i_order.type) {
-      case OrderType::Ask: {
-        // I is ask; J is bid
-        if (j_order.info.price > i_order.info.price) {
-          // Check if the global book has a better trade
-          OrderInfo &glob_bid = world_state.getHighestBid();
+          if (prev_order_state.
 
-          if (glob_bid.price > j_order.info.price) {
-            PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
-
-            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
-                ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
-
-            executeTrade(i_order.info, glob_bid,
-                i_state, issuer_state);
-
-            // Makes sure to clean up the global 
-            world_state.updateWorldState(ctx);
-          } else {
-            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d)\n",
-                j_agent_idx, i_agent_idx, i_order.info.price, i_order.info.size);
-
-            executeTrade(i_order.info, j_order.info,
-                i_state, j_state);
-          }
+          prev_order_state.size = 0;
         }
-      } break;
-
-      case OrderType::Bid: {
-        if (j_order.info.price < i_order.info.price) {
-          // Check if global book has a better trade
-          OrderInfo &glob_ask = world_state.getLowestAsk();
-
-          if (glob_ask.price < j_order.info.price) {
-            PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
-
-            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
-                i_agent_idx, ctx.loc(glob_ask.issuer).row, glob_ask.price, glob_ask.size);
-
-            executeTrade(glob_ask, i_order.info,
-                issuer_state, i_state);
-
-            world_state.updateWorldState(ctx);
-          } else {
-            printf("agent %d bidding with agent %d's ask of (price = %d; size = %d)\n",
-                i_agent_idx, j_agent_idx, j_order.info.price, j_order.info.size);
-
-            executeTrade(j_order.info, i_order.info,
-                j_state, i_state);
-          }
-        }
-      } break;
-
-      case OrderType::None: {
-        MADRONA_UNREACHABLE();
-      } break;
       }
     }
-  }
 
-  // Maybe it's still possible to trade against stuff in the global book
-  // if going through the current orders didn't exhaust everything
-  for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
-    uint32_t i_agent_idx = rand_perm[i];
-    PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
-    PlayerState &i_state = world_state.playerStates[i_agent_idx];
+    { // Can we actually execute this order?
+      if (i_order.type == OrderType::Bid) {
+        if (i_order.info.size * i_order.info.price > i_state.dollarsIfBidsFilled) {
+          i_order.info.size = 0;
+          continue;
+        }
+      } else if (i_order.type == OrderType::Ask) {
+        if (i_order.info.size > i_state.positionIfAsksFilled) {
+          i_order.info.size = 0;
+          continue;
+        }
+    }
 
-    // Keep taking from the global book until order has been exhausted
-    bool traded = false;
-    do {
-      switch (i_order.type) {
-      case OrderType::Ask: {
-        OrderInfo &glob_bid = world_state.getHighestBid();
+    while (i_order.size) {
+      // First, find the best order of new orders not in the book yet from prior players in the ordering
+      int32_t best_trade_idx = -1;
+      uint32_t best_price = (i_order.type == OrderType::Ask) ?
+        world_state.getHighestBid() : world_state.getLowestAsk();
 
-        if (glob_bid.price > i_order.info.price) {
+      for (int32_t j = 0; j < i; ++j) {
+        uint32_t j_agent_idx = rand_perm[j];
+        PlayerOrder &j_order = world_state.playerOrders[j_agent_idx];
+        PlayerState &j_state = world_state.playerStates[j_agent_idx];
+
+        if (i_order.type == j_order.type || j_order.info.size == 0) {
+          printf("orders are of same type, skipping\n");
+          continue;
+        }
+
+        if (j_order.type == OrderType::Ask) {
+          if (j_order.price < best_price) {
+            best_trade_idx = j;
+            best_price = j_order.price;
+          }
+        } else if (j_order.type == OrderType::Bid) {
+          if (j_order.price > best_price) {
+            best_trade_idx = j;
+            best_price = j_order.price;
+          }
+        } else {
+          assert(false);
+        }
+      }
+
+      if (i_order.type == OrderType::Ask) {
+        if (best_price < i_order.price) {
+          break;
+        }
+
+        if (best_trade_idx == -1) {
+          OrderInfo &glob_bid = world_state.getHighestBid();
+
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
 
-          traded = executeTrade(i_order.info, glob_bid,
+          printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+                 ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
+
+          executeTrade(i_order.info, glob_bid,
                        i_state, issuer_state);
 
+          // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
+        } else {
+          PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
+          PlayerState &other_state = world_state.playerStates[best_trade_idx];
+
+          executeTrade(i_order.info, other_order,
+                       i_state, other_state);
         }
-      } break;
+      } else if (i_order.type == OrderType::Bid) {
+        if (best_price > i_order.price) {
+          break;
+        }
 
-      case OrderType::Bid: {
-        OrderInfo &glob_ask = world_state.getLowestAsk();
+        if (best_trade_idx == -1) {
+          OrderInfo &glob_ask = world_state.getLowestAsk();
 
-        if (glob_ask.price < i_order.info.price) {
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
 
-          traded = executeTrade(glob_ask, i_order.info,
+          //printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+          //ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
+
+          executeTrade(glob_ask, i_order.info,
                        issuer_state, i_state);
 
+          // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
-        }
-      } break;
+        } else {
+          PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
+          PlayerState &other_state = world_state.playerStates[best_trade_idx];
 
-      case OrderType::None: {
-        MADRONA_UNREACHABLE();
-      } break;
+          executeTrade(other_order, i_order.info,
+                       other_state, i_state);
+        }
+      } else {
+        assert(false);
       }
-    } while (traded);
+    }
   }
 
   for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
@@ -551,7 +571,7 @@ inline void matchSystem(Engine &ctx,
           i_order.info.price,
           i_order.info.size);
 
-      world_state.addOrder(
+      i_state.prevOrder = world_state.addOrder(
           ctx, 
           i_order);
     }
