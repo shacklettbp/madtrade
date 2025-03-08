@@ -119,8 +119,12 @@ static void initWorld(Engine &ctx)
     Entity a = ctx.makeEntity<Agent>();
 
     ctx.get<PlayerState>(a) = {
-      .position = 0,
-      .dollars = 100,
+      .position = 10,
+      .dollars = 1000,
+      .positionIfAsksFilled = 10,
+      .dollarsIfBidsFilled = 1000,
+      .prevAsk = Entity::none(),
+      .prevBid = Entity::none(),
     };
 
     ctx.get<PlayerOrder>(a) = {
@@ -203,9 +207,9 @@ inline void actionsSystem(Engine &ctx,
     .issuer = e,
   };
 
-  printf("Agent (%d) placed order (%d); price = %d; size = %d\n",
+  printf("Agent (%d) placed order (%s); price = %d; size = %d\n",
       ctx.loc(e).row,
-      (uint32_t)action.type,
+      action.type == OrderType::Ask ? "ask" : "bid",
       order.info.price,
       order.info.size);
 }
@@ -256,7 +260,7 @@ struct WorldState {
 
   OrderInfo &getHighestBid()
   {
-    if (globalGlook.curBidOffset >= globalBook.numBids) {
+    if (globalBook.curBidOffset >= globalBook.numBids) {
       return globalBook.dummyBid;
     } else {
       return globalBook.bids[globalBook.curBidOffset];
@@ -416,8 +420,16 @@ static bool executeTrade(OrderInfo &ask,
   ask.size -= traded_quantity;
   bid.size -= traded_quantity;
 
+  // Update actual balances
   asker_state.dollars += traded_quantity * bid.price;
   bidder_state.dollars -= traded_quantity * bid.price;
+
+  // Update actual positions
+  asker_state.position -= traded_quantity;  // Seller loses position
+  bidder_state.position += traded_quantity; // Buyer gains position
+
+  // Don't update positionIfAsksFilled or dollarsIfBidsFilled here
+  // because these values already account for these orders being filled
 
   return (traded_quantity > 0);
 }
@@ -438,72 +450,101 @@ inline void matchSystem(Engine &ctx,
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
     PlayerState &i_state = world_state.playerStates[i_agent_idx];
 
-    // FIXME: Whenever we add or delete an order we need to update positionIfAsksFilled
-    // & dollarsIfBidsFilled.
-    if (ctx.data().flags == SimFlags::InterpretAddAsReplace) {
-      // FIXME: Two things still need to happen here:
-      // If we're doing a bid or ask order, we need to check if we have one of those
-      // orders outstanding i_state.prevAsk / prevBid != Entity::none() and delete them
-      // In this case we also need to update dollarsIfBidsFilled / ask
+    printf("\n[i loop] Agent (%d) has order (%s; price=%d; size=%d)\n", i_agent_idx, i_order.type == OrderType::Ask ? "ask" : "bid", i_order.info.price, i_order.info.size);
+    // printf("Current state of agent (%d): dollars = %d; position = %d; dollarsIfBidsFilled = %d; positionIfAsksFilled = %d\n", i_agent_idx, i_state.dollars, i_state.position, i_state.dollarsIfBidsFilled, i_state.positionIfAsksFilled);
+
+    if (ctx.data().simFlags == SimFlags::InterpretAddAsReplace) {
+      // Handle replacement mode - cancel any existing orders first
       if (i_order.type == OrderType::Ask) {
         if (i_state.prevAsk != Entity::none()) {
-
-          Order &prev_order_state = ctx.get<Order>(i_state.prevOrder);
-          OrderInfo &prev_order_info = pre
-
-          if (prev_order_state.
-
-          prev_order_state.size = 0;
+            printf("[AddAsReplace] Cancelling agent %d's previous ask\n", i_agent_idx);
+          // Get the previous ask order info
+          OrderInfo &prev_order_info = ctx.get<OrderInfo>(i_state.prevAsk);
+          
+          // Add back the position that would have been sold
+          i_state.positionIfAsksFilled += prev_order_info.size;
+          
+          // Delete the old ask
+          prev_order_info.size = 0;
+          i_state.prevAsk = Entity::none();
+        }
+      } else if (i_order.type == OrderType::Bid) {
+        if (i_state.prevBid != Entity::none()) {
+            printf("[AddAsReplace] Cancelling agent %d's previous bid\n", i_agent_idx);
+          // Get the previous bid order info
+          OrderInfo &prev_order_info = ctx.get<OrderInfo>(i_state.prevBid);
+          
+          // Add back the dollars that would have been spent
+          i_state.dollarsIfBidsFilled += prev_order_info.size * prev_order_info.price;
+          prev_order_info.size = 0;
+          i_state.prevBid = Entity::none();
         }
       }
     }
 
-    { // Can we actually execute this order?
-      if (i_order.type == OrderType::Bid) {
-        if (i_order.info.size * i_order.info.price > i_state.dollarsIfBidsFilled) {
-          i_order.info.size = 0;
-          continue;
-        }
-      } else if (i_order.type == OrderType::Ask) {
-        if (i_order.info.size > i_state.positionIfAsksFilled) {
-          i_order.info.size = 0;
-          continue;
-        }
+    // Validate if order can be executed
+    if (i_order.type == OrderType::Bid) {
+      if (i_order.info.size * i_order.info.price > (int64_t)i_state.dollarsIfBidsFilled) {
+        printf("[Invalid] Agent %d's bid is too large: %d * %d > %d\n", i_agent_idx, i_order.info.size, i_order.info.price, i_state.dollarsIfBidsFilled);
+        i_order.info.size = 0;
+        continue;
+      }
+      // Update the state if the order is valid
+      i_state.dollarsIfBidsFilled -= i_order.info.size * i_order.info.price;
+    } else if (i_order.type == OrderType::Ask) {
+      if (i_order.info.size > i_state.positionIfAsksFilled) {
+        printf("[Invalid] Agent %d's ask is too large: %d > %d\n", i_agent_idx, i_order.info.size, i_state.positionIfAsksFilled);
+        i_order.info.size = 0;
+        continue;
+      }
+      // Update the state if the order is valid
+      i_state.positionIfAsksFilled -= i_order.info.size;
     }
 
-    while (i_order.size) {
+    bool didExecute = false;
+    while (i_order.info.size) {
       // First, find the best order of new orders not in the book yet from prior players in the ordering
       int32_t best_trade_idx = -1;
       uint32_t best_price = (i_order.type == OrderType::Ask) ?
-        world_state.getHighestBid() : world_state.getLowestAsk();
+        world_state.getHighestBid().price : world_state.getLowestAsk().price;
 
       for (int32_t j = 0; j < i; ++j) {
         uint32_t j_agent_idx = rand_perm[j];
         PlayerOrder &j_order = world_state.playerOrders[j_agent_idx];
-        PlayerState &j_state = world_state.playerStates[j_agent_idx];
 
-        if (i_order.type == j_order.type || j_order.info.size == 0) {
-          printf("orders are of same type, skipping\n");
+        if (i_order.type == j_order.type) {
+          printf("[Skip] Agents %d and %d have orders of same type (%s), skipping\n",
+                 i_agent_idx, j_agent_idx,
+                 j_order.type == OrderType::Ask ? "ask" : "bid");
           continue;
         }
 
+        if (j_order.info.size == 0) {
+            printf("[Skip] Agent %d has order of size 0, skipping\n", j_agent_idx);
+            continue;
+        }
+
         if (j_order.type == OrderType::Ask) {
-          if (j_order.price < best_price) {
-            best_trade_idx = j;
-            best_price = j_order.price;
+          if (j_order.info.price < best_price) {
+            // printf("[best_trade_idx] Agent %d's ask is better than current best price: %d < %d\n", j_agent_idx, j_order.info.price, best_price);
+            best_trade_idx = j_agent_idx;
+            best_price = j_order.info.price;
           }
         } else if (j_order.type == OrderType::Bid) {
-          if (j_order.price > best_price) {
-            best_trade_idx = j;
-            best_price = j_order.price;
+          if (j_order.info.price > best_price) {
+            // printf("[best_trade_idx] Agent %d's bid is better than current best price: %d > %d\n", j_agent_idx, j_order.info.price, best_price);
+            best_trade_idx = j_agent_idx;
+            best_price = j_order.info.price;
           }
         } else {
           assert(false);
         }
       }
 
+    //   printf("[best_trade_idx] best_trade_idx = %d (best_price = %d)\n", best_trade_idx, best_price);
+
       if (i_order.type == OrderType::Ask) {
-        if (best_price < i_order.price) {
+        if (best_price < i_order.info.price) {
           break;
         }
 
@@ -512,7 +553,7 @@ inline void matchSystem(Engine &ctx,
 
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
 
-          printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+          printf("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
                  ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
 
           executeTrade(i_order.info, glob_bid,
@@ -520,15 +561,20 @@ inline void matchSystem(Engine &ctx,
 
           // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
+          didExecute = true;
         } else {
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
           PlayerState &other_state = world_state.playerStates[best_trade_idx];
 
-          executeTrade(i_order.info, other_order,
+          printf("[Match] Agent %d asking with agent %d's bid of (price = %d; size = %d)\n",
+                 i_agent_idx, best_trade_idx, other_order.info.price, other_order.info.size);
+
+          executeTrade(i_order.info, other_order.info,
                        i_state, other_state);
+          didExecute = true;
         }
       } else if (i_order.type == OrderType::Bid) {
-        if (best_price > i_order.price) {
+        if (best_price > i_order.info.price) {
           break;
         }
 
@@ -537,27 +583,39 @@ inline void matchSystem(Engine &ctx,
 
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
 
-          //printf("agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
-          //ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
+          printf("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+                 i_agent_idx, ctx.loc(glob_ask.issuer).row, glob_ask.price, glob_ask.size);
 
           executeTrade(glob_ask, i_order.info,
                        issuer_state, i_state);
 
           // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
+          didExecute = true;
         } else {
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
           PlayerState &other_state = world_state.playerStates[best_trade_idx];
 
-          executeTrade(other_order, i_order.info,
+          printf("[Match] Agent %d bidding with agent %d's ask of (price = %d; size = %d)\n",
+                 i_agent_idx, best_trade_idx, other_order.info.price, other_order.info.size);
+
+          executeTrade(other_order.info, i_order.info,
                        other_state, i_state);
+          didExecute = true;
         }
       } else {
         assert(false);
       }
     }
+
+    if (!didExecute) {
+      printf("[No match] Agent %d's order was not executed\n", i_agent_idx);
+    }
   }
 
+  printf("\n[matchSystem] Done with i loop\n\n");
+
+  // After going through all orders, add any remaining orders to the global book
   for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
     uint32_t i_agent_idx = rand_perm[i];
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
@@ -565,23 +623,33 @@ inline void matchSystem(Engine &ctx,
 
     // If the order still has stuff in it, push it to the end of the global book
     if (i_order.info.size > 0) {
-      printf("Adding agent %d's order to the global book (type=%d; price=%d; size=%d)\n", 
+      printf("[Remaining] Adding agent %d's order to the global book (type=%s; price=%d; size=%d)\n", 
           i_agent_idx,
-          (uint32_t)i_order.type,
+          i_order.type == OrderType::Ask ? "ask" : "bid",
           i_order.info.price,
           i_order.info.size);
+      Entity new_order = world_state.addOrder(ctx, i_order);
 
-      i_state.prevOrder = world_state.addOrder(
-          ctx, 
-          i_order);
+      // Store reference to the order
+      if (i_order.type == OrderType::Ask) {
+        if (ctx.data().simFlags == SimFlags::InterpretAddAsReplace) {
+          assert(i_state.prevAsk == Entity::none());
+        }
+        i_state.prevAsk = new_order;
+      } else if (i_order.type == OrderType::Bid) {
+        if (ctx.data().simFlags == SimFlags::InterpretAddAsReplace) {
+          assert(i_state.prevBid == Entity::none());
+        }
+        i_state.prevBid = new_order;
+      }
     }
   }
 }
 
 inline void fillOrderObservationsSystem(Engine &ctx,
-                                        const PlayerState &player_state,
-                                        AskOrderObservation &ask_obs,
-                                        BidOrderObservation &bid_obs)
+                                      const PlayerState &player_state,
+                                      AskOrderObservation &ask_obs,
+                                      BidOrderObservation &bid_obs)
 {
   (void)ctx;
   (void)player_state;
@@ -589,6 +657,7 @@ inline void fillOrderObservationsSystem(Engine &ctx,
   // Every player will fill in top K orders from the book
   WorldState world_state = getWorldState(ctx);
 
+  // Fill ask observations
   uint32_t to_cpy = std::min((uint32_t)K, world_state.globalBook.numAsks);
   for (uint32_t i = 0; i < to_cpy; ++i) {
     ask_obs.orders[i] = Order {
@@ -596,19 +665,18 @@ inline void fillOrderObservationsSystem(Engine &ctx,
       world_state.globalBook.asks[i].price,
     };
   }
-
   for (uint32_t i = to_cpy; i < K; ++i) {
     ask_obs.orders[i] = Order { 0, 0 };
   }
 
+  // Fill bid observations
   to_cpy = std::min((uint32_t)K, world_state.globalBook.numBids);
   for (uint32_t i = 0; i < to_cpy; ++i) {
     bid_obs.orders[i] = Order {
-      world_state.globalBook.asks[i].size,
-      world_state.globalBook.asks[i].price,
+      world_state.globalBook.bids[i].size,
+      world_state.globalBook.bids[i].price,
     };
   }
-
   for (uint32_t i = to_cpy; i < K; ++i) {
     bid_obs.orders[i] = Order { 0, 0 };
   }
@@ -699,7 +767,8 @@ Sim::Sim(Engine &ctx,
          const TaskConfig &cfg,
          const WorldInit &)
     : WorldBase(ctx),
-      numAgents(cfg.numAgents)
+      numAgents(cfg.numAgents),
+      simFlags(cfg.simFlags)
 {
   rewardHyperParams = cfg.rewardHyperParamsBuffer;
   initRandKey = cfg.initRandKey;
