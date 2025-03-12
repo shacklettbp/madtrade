@@ -164,6 +164,7 @@ struct TaskConfig {
   madrona::RandKey initRandKey;
   uint32_t numAgents;
   SimFlags simFlags;
+  uint32_t settlementPrice;
 };
 
 // The Sim class encapsulates the per-world state of the simulation.
@@ -200,6 +201,7 @@ struct Sim : public madrona::WorldBase {
 
   uint32_t numAgents;
   SimFlags simFlags;
+  uint32_t settlementPrice;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

@@ -22,6 +22,7 @@ NB_MODULE(mad_trade, m) {
                             int64_t gpu_id,
                             int64_t num_worlds,
                             int64_t num_agents_per_world,
+                            uint32_t settlement_price,
                             uint32_t sim_flags,
                             uint32_t num_pbt_policies) {
             new (self) Manager(Manager::Config {
@@ -29,6 +30,7 @@ NB_MODULE(mad_trade, m) {
                 .gpuID = (int)gpu_id,
                 .numWorlds = (uint32_t)num_worlds,
                 .numAgentsPerWorld = (uint32_t)num_agents_per_world,
+                .settlementPrice = settlement_price,
                 .simFlags = SimFlags(sim_flags),
                 .numPBTPolicies = num_pbt_policies,
             });
@@ -36,6 +38,7 @@ NB_MODULE(mad_trade, m) {
            nb::arg("gpu_id"),
            nb::arg("num_worlds"),
            nb::arg("num_agents_per_world"),
+           nb::arg("settlement_price"),
            nb::arg("sim_flags"),
            nb::arg("num_pbt_policies"))
         .def("step", &Manager::step)

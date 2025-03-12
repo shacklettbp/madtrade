@@ -180,7 +180,8 @@ inline void rewardSystem(Engine &ctx,
 
   (void)reward_hyper_params.somePerPolicyRewardScaling;
 
-  out_reward.v = 0;
+  // Current amount of dollars plus position times settlement price
+  out_reward.v = player_state.dollars + player_state.position * ctx.data().settlementPrice;
 }
 
 inline void doneSystem(Engine &ctx,
@@ -243,8 +244,8 @@ struct WorldState {
     // These are orders which could never be traded against.
     // We keep these in case there are no trades in the global
     // book.
-    OrderInfo dummyAsk;
-    OrderInfo dummyBid;
+    OrderInfo dummyAsk { kMaxPrice, 0, Entity::none() };
+    OrderInfo dummyBid { 0, 0, Entity::none() };
   } globalBook;
 
   StepStats stepStats;
@@ -291,7 +292,7 @@ struct WorldState {
     while (true) {
       OrderInfo &lowest_ask = getLowestAsk();
 
-      if (lowest_ask.size == 0) {
+      if (lowest_ask.size == 0 && lowest_ask.price != kMaxPrice && lowest_ask.issuer != Entity::none()) {
         ctx.destroyEntity(lowest_ask.issuer);
         globalBook.curAskOffset++;
       } else {
@@ -302,7 +303,7 @@ struct WorldState {
     while (true) {
       OrderInfo &highest_bid = getHighestBid();
 
-      if (highest_bid.size == 0) {
+      if (highest_bid.size == 0 && highest_bid.price != 0 && highest_bid.issuer != Entity::none()) {
         ctx.destroyEntity(highest_bid.issuer);
         globalBook.curBidOffset++;
       } else {
@@ -715,11 +716,24 @@ inline void fillOrderObservationsSystem(Engine &ctx,
   }
 
   TimeStepObservation &cur_obs = all_obs.obs[0];
+  StepStats &stats = world_state.stepStats;
 
   cur_obs.me.position = player_state.position;
   cur_obs.me.dollars = player_state.dollars;
   cur_obs.me.positionIfAsksFilled = player_state.positionIfAsksFilled;
   cur_obs.me.dollarsIfBidsFilled = player_state.dollarsIfBidsFilled;
+  
+  if (stats.volume == 0) {
+    cur_obs.avgPrice = -1;
+  } else {
+    cur_obs.avgPrice = stats.totalDollarsTraded / stats.volume;
+  }
+  cur_obs.dirVolume = stats.dirVolume;
+  cur_obs.volume = stats.volume;
+
+  for (int i = 0; i < NUM_TRACKED_EXECUTED_ORDERS; i++) {
+    cur_obs.executedTrades[i] = stats.executedTrades[i];
+  }
 
   // Fill ask observations
   uint32_t to_cpy = std::min((uint32_t)K, world_state.globalBook.numAsks);
@@ -833,7 +847,8 @@ Sim::Sim(Engine &ctx,
          const WorldInit &)
     : WorldBase(ctx),
       numAgents(cfg.numAgents),
-      simFlags(cfg.simFlags)
+      simFlags(cfg.simFlags),
+      settlementPrice(cfg.settlementPrice)
 {
   rewardHyperParams = cfg.rewardHyperParamsBuffer;
   initRandKey = cfg.initRandKey;

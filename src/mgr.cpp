@@ -277,6 +277,7 @@ Manager::Impl * Manager::Impl::init(
     .initRandKey = rand::initKey(0),
     .numAgents = mgr_cfg.numAgentsPerWorld,
     .simFlags = mgr_cfg.simFlags,
+    .settlementPrice = mgr_cfg.settlementPrice
   };
 
   switch (mgr_cfg.execMode) {
