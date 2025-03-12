@@ -37,8 +37,7 @@ void Sim::registerTypes(ECSRegistry &registry,
   registry.registerComponent<PriceKey>();
   registry.registerComponent<OrderInfo>();
 
-  registry.registerComponent<AskOrderObservation>();
-  registry.registerComponent<BidOrderObservation>();
+  registry.registerComponent<FullObservation>();
 
   registry.registerArchetype<Agent>();
   registry.registerArchetype<Bid>();
@@ -62,12 +61,8 @@ void Sim::registerTypes(ECSRegistry &registry,
   registry.exportColumn<Agent, AgentPolicy>(
       (uint32_t)ExportID::AgentPolicy);
 
-  registry.exportColumn<Agent, AskOrderObservation>(
-      (uint32_t)ExportID::AskOrdersObservation);
-  registry.exportColumn<Agent, BidOrderObservation>(
-      (uint32_t)ExportID::BidOrdersObservation);
-  registry.exportColumn<Agent, PlayerState>(
-      (uint32_t)ExportID::AgentStateObservation);
+  registry.exportColumn<Agent, FullObservation>(
+      (uint32_t)ExportID::Observation);
 }
 
 static void cleanupWorld(Engine &ctx)
@@ -139,6 +134,9 @@ static void initWorld(Engine &ctx)
     ctx.get<Done>(a) = {
       .done = 0
     };
+
+    FullObservation &all_obs = ctx.get<FullObservation>(a);
+    memset(&all_obs, 0, sizeof(FullObservation));
   }
 
   ctx.singleton<WorldReset>().reset = 0;
@@ -214,6 +212,15 @@ inline void actionsSystem(Engine &ctx,
       order.info.size);
 }
 
+struct StepStats {
+  int32_t volume = 0;
+  int32_t dirVolume = 0;
+  int32_t totalDollarsTraded = 0;
+
+  Order executedTrades[NUM_TRACKED_EXECUTED_ORDERS] = {};
+  int numExecutedTrades = 0;
+};
+
 struct WorldState {
   uint32_t numPlayerOrders;
   PlayerOrder *playerOrders;
@@ -239,6 +246,8 @@ struct WorldState {
     OrderInfo dummyAsk;
     OrderInfo dummyBid;
   } globalBook;
+
+  StepStats stepStats;
 
   OrderInfo &getLowestAsk()
   {
@@ -324,8 +333,10 @@ struct WorldState {
 
       return bid;
     } break;
-
-    case OrderType::None: {
+    case OrderType::Hold: {
+      return Entity::none();
+    } break;
+    default: {
       MADRONA_UNREACHABLE();
     } break;
     }
@@ -385,6 +396,7 @@ static WorldState getWorldState(Engine &ctx)
       OrderInfo {  0xFFFF'FFFF, 0, Entity::none() },
       OrderInfo { 0, 0, Entity::none() },
     },
+    StepStats {},
   };
 }
 
@@ -407,22 +419,31 @@ static void genRandomPerm(Engine &ctx,
 static bool executeTrade(OrderInfo &ask,
                          OrderInfo &bid,
                          PlayerState &asker_state,
-                         PlayerState &bidder_state)
+                         PlayerState &bidder_state,
+                         StepStats &stats,
+                         bool ask_is_resting)
 {
   // Global has a higher bid; do trade with this
   uint32_t traded_quantity = std::min(
       ask.size, bid.size);
 
+  uint32_t price;
+  if (ask_is_resting) {
+    price = ask.price;
+  } else {
+    price = bid.price;
+  }
+
   // Make sure that the bidder has enough dollars to pay
   traded_quantity = std::min(traded_quantity,
-                             bidder_state.dollars / ask.price);
+                             bidder_state.dollars / price);
 
   ask.size -= traded_quantity;
   bid.size -= traded_quantity;
 
   // Update actual balances
-  asker_state.dollars += traded_quantity * bid.price;
-  bidder_state.dollars -= traded_quantity * bid.price;
+  asker_state.dollars += traded_quantity * price;
+  bidder_state.dollars -= traded_quantity *price;
 
   // Update actual positions
   asker_state.position -= traded_quantity;  // Seller loses position
@@ -430,6 +451,30 @@ static bool executeTrade(OrderInfo &ask,
 
   // Don't update positionIfAsksFilled or dollarsIfBidsFilled here
   // because these values already account for these orders being filled
+  
+  if (ask_is_resting) {
+    // The bidder overbid but is paying less because the ask order's price is used
+    uint32_t delta = bid.price - ask.price;
+    bidder_state.dollarsIfBidsFilled += delta * traded_quantity;
+  }
+
+  stats.volume += traded_quantity;
+
+  if (ask_is_resting) {
+    stats.dirVolume += traded_quantity;
+  } else {
+    stats.dirVolume -= traded_quantity;
+  }
+
+  stats.totalDollarsTraded += price * traded_quantity;
+
+  int executed_trade_idx = stats.numExecutedTrades++;
+  executed_trade_idx %= NUM_TRACKED_EXECUTED_ORDERS;
+
+  stats.executedTrades[executed_trade_idx] = {
+    .size = (int32_t)traded_quantity,
+    .price = price,
+  };
 
   return (traded_quantity > 0);
 }
@@ -439,6 +484,10 @@ inline void matchSystem(Engine &ctx,
 {
   (void)market;
   WorldState world_state = getWorldState(ctx);
+
+  {
+    world_state.stepStats = StepStats {};
+  }
 
   // Get a random permutation of current orders
   uint32_t *rand_perm = (uint32_t *)ctx.tmpAlloc(
@@ -480,6 +529,11 @@ inline void matchSystem(Engine &ctx,
           i_state.prevBid = Entity::none();
         }
       }
+    }
+
+    if (i_order.type == OrderType::Hold) {
+      i_order.info.size = 0;
+      i_order.info.price = 0;
     }
 
     // Validate if order can be executed
@@ -557,7 +611,7 @@ inline void matchSystem(Engine &ctx,
                  ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
 
           executeTrade(i_order.info, glob_bid,
-                       i_state, issuer_state);
+                       i_state, issuer_state, world_state.stepStats, false);
 
           // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
@@ -570,7 +624,7 @@ inline void matchSystem(Engine &ctx,
                  i_agent_idx, best_trade_idx, other_order.info.price, other_order.info.size);
 
           executeTrade(i_order.info, other_order.info,
-                       i_state, other_state);
+                       i_state, other_state, world_state.stepStats, false);
           didExecute = true;
         }
       } else if (i_order.type == OrderType::Bid) {
@@ -587,7 +641,7 @@ inline void matchSystem(Engine &ctx,
                  i_agent_idx, ctx.loc(glob_ask.issuer).row, glob_ask.price, glob_ask.size);
 
           executeTrade(glob_ask, i_order.info,
-                       issuer_state, i_state);
+                       issuer_state, i_state, world_state.stepStats, true);
 
           // Makes sure to clean up the global 
           world_state.updateWorldState(ctx);
@@ -600,7 +654,7 @@ inline void matchSystem(Engine &ctx,
                  i_agent_idx, best_trade_idx, other_order.info.price, other_order.info.size);
 
           executeTrade(other_order.info, i_order.info,
-                       other_state, i_state);
+                       other_state, i_state, world_state.stepStats, true);
           didExecute = true;
         }
       } else {
@@ -647,9 +701,8 @@ inline void matchSystem(Engine &ctx,
 }
 
 inline void fillOrderObservationsSystem(Engine &ctx,
-                                      const PlayerState &player_state,
-                                      AskOrderObservation &ask_obs,
-                                      BidOrderObservation &bid_obs)
+                                        const PlayerState &player_state,
+                                        FullObservation &all_obs)
 {
   (void)ctx;
   (void)player_state;
@@ -657,29 +710,42 @@ inline void fillOrderObservationsSystem(Engine &ctx,
   // Every player will fill in top K orders from the book
   WorldState world_state = getWorldState(ctx);
 
+  for (int32_t i = OBSERVATION_HISTORY_LEN - 2; i >= 0; i--) {
+    all_obs.obs[i + 1] = all_obs.obs[i];
+  }
+
+  TimeStepObservation &cur_obs = all_obs.obs[0];
+
+  cur_obs.me.position = player_state.position;
+  cur_obs.me.dollars = player_state.dollars;
+  cur_obs.me.positionIfAsksFilled = player_state.positionIfAsksFilled;
+  cur_obs.me.dollarsIfBidsFilled = player_state.dollarsIfBidsFilled;
+
   // Fill ask observations
   uint32_t to_cpy = std::min((uint32_t)K, world_state.globalBook.numAsks);
   for (uint32_t i = 0; i < to_cpy; ++i) {
-    ask_obs.orders[i] = Order {
+    cur_obs.bookAsks[i] = Order {
       world_state.globalBook.asks[i].size,
       world_state.globalBook.asks[i].price,
     };
   }
   for (uint32_t i = to_cpy; i < K; ++i) {
-    ask_obs.orders[i] = Order { 0, 0 };
+    cur_obs.bookAsks[i] = Order { 0, 0 };
   }
 
   // Fill bid observations
   to_cpy = std::min((uint32_t)K, world_state.globalBook.numBids);
   for (uint32_t i = 0; i < to_cpy; ++i) {
-    bid_obs.orders[i] = Order {
+    cur_obs.bookBids[i] = Order {
       world_state.globalBook.bids[i].size,
       world_state.globalBook.bids[i].price,
     };
   }
+
   for (uint32_t i = to_cpy; i < K; ++i) {
-    bid_obs.orders[i] = Order { 0, 0 };
+    cur_obs.bookBids[i] = Order { 0, 0 };
   }
+
 }
 
 static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder, 
@@ -697,8 +763,7 @@ static TaskGraphNodeID resetAndObsTasks(TaskGraphBuilder &builder,
   auto obs_sys = builder.addToGraph<ParallelForNode<Engine,
     fillOrderObservationsSystem,
       PlayerState,
-      AskOrderObservation,
-      BidOrderObservation
+      FullObservation
     >>({reset_sys});
 
   return obs_sys;

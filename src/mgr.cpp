@@ -434,35 +434,14 @@ Tensor Manager::policyAssignmentTensor() const
                              });
 }
 
-Tensor Manager::askOrdersObservationTensor() const
+Tensor Manager::observationTensor() const
 {
-  return impl_->exportTensor(ExportID::AskOrdersObservation,
+  return impl_->exportTensor(ExportID::Observation,
                              TensorElementType::Int32,
                              {
                                impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
-                               K,
-                               sizeof(Order) / sizeof(int32_t),
-                             });
-}
-
-Tensor Manager::bidOrdersObservationTensor() const
-{
-  return impl_->exportTensor(ExportID::BidOrdersObservation,
-                             TensorElementType::Int32,
-                             {
-                               impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
-                               K,
-                               sizeof(Order) / sizeof(int32_t),
-                             });
-}
-
-Tensor Manager::agentStateObservationTensor() const
-{
-  return impl_->exportTensor(ExportID::AgentStateObservation,
-                             TensorElementType::Int32,
-                             {
-                               impl_->cfg.numWorlds * impl_->numAgentsPerWorld,
-                               sizeof(PlayerState) / sizeof(int32_t),
+                               OBSERVATION_HISTORY_LEN,
+                               sizeof(TimeStepObservation) / sizeof(int32_t),
                              });
 }
 
@@ -500,9 +479,7 @@ TrainInterface Manager::trainInterface() const
     },
     {
       .observations = {
-        { "ask_orders", askOrdersObservationTensor() },
-        { "bid_orders", bidOrdersObservationTensor() },
-        { "position", agentStateObservationTensor() },
+        { "obs", observationTensor() },
       },
       .rewards = rewardTensor(),
       .dones = doneTensor(),

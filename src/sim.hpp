@@ -10,7 +10,10 @@
 namespace madtrade {
 
 inline constexpr int32_t K = 10;
+inline constexpr int32_t MAX_AGENTS = 5;
+inline constexpr int32_t NUM_TRACKED_EXECUTED_ORDERS = MAX_AGENTS;
 inline constexpr uint32_t kMaxPrice = 100;
+inline constexpr int32_t OBSERVATION_HISTORY_LEN = 10;
 
 class Engine;
 
@@ -24,9 +27,7 @@ enum class ExportID : uint32_t {
     Reward,
     Done,
     AgentPolicy,
-    AskOrdersObservation,
-    BidOrdersObservation,
-    AgentStateObservation,
+    Observation,
 
     NumExports,
 };
@@ -40,6 +41,7 @@ enum class TaskGraphID : uint32_t {
 enum class OrderType : uint32_t {
   Ask,
   Bid,
+  Hold,
   None
 };
 
@@ -122,19 +124,31 @@ struct Order {
   uint32_t price;
 };
 
-struct AskOrderObservation {
-  Order orders[K];
+struct PlayerStateObservation {
+  int32_t position;
+  int32_t dollars;
+  int32_t positionIfAsksFilled;
+  int32_t dollarsIfBidsFilled;
 };
 
-struct BidOrderObservation {
-  Order orders[K];
+struct TimeStepObservation {
+  PlayerStateObservation me;
+  Order bookAsks[K];
+  Order bookBids[K];
+  Order executedTrades[NUM_TRACKED_EXECUTED_ORDERS];
+  int32_t volume;
+  int32_t dirVolume;
+  int32_t avgPrice;
+};
+
+struct FullObservation {
+  TimeStepObservation obs[OBSERVATION_HISTORY_LEN];
 };
 
 struct Agent : madrona::Archetype<
   PlayerState,
   PlayerOrder,
-  AskOrderObservation,
-  BidOrderObservation,
+  FullObservation,
   Action,
   Reward,
   Done,

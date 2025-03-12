@@ -52,9 +52,7 @@ public:
   madrona::py::Tensor rewardHyperParamsTensor() const;
   madrona::py::Tensor matchResultTensor() const;
 
-  madrona::py::Tensor askOrdersObservationTensor() const;
-  madrona::py::Tensor bidOrdersObservationTensor() const;
-  madrona::py::Tensor agentStateObservationTensor() const;
+  madrona::py::Tensor observationTensor() const;
 
   madrona::py::TrainInterface trainInterface() const;
 

@@ -32,7 +32,7 @@ from madrona_learn.rnn import LSTM
 
 actions_config = {
     'buy_sell': DiscreteActionsConfig(
-        actions_num_buckets = [ 2, 2 ],
+        actions_num_buckets = [ 3, 24, 2 ],
     ),
 }
 
