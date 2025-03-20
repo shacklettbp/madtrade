@@ -33,6 +33,8 @@ void Sim::registerTypes(ECSRegistry &registry,
   registry.registerComponent<Action>();
   registry.registerComponent<PlayerState>();
   registry.registerComponent<PlayerOrder>();
+  registry.registerComponent<NPCState>();
+  registry.registerComponent<NPCOrder>();
 
   registry.registerComponent<PriceKey>();
   registry.registerComponent<OrderInfo>();
@@ -42,6 +44,7 @@ void Sim::registerTypes(ECSRegistry &registry,
   registry.registerArchetype<Agent>();
   registry.registerArchetype<Bid>();
   registry.registerArchetype<Ask>();
+  registry.registerArchetype<NPC>();
 
   registry.registerSingleton<MatchResult>();
   registry.registerSingleton<Market>();
@@ -81,6 +84,14 @@ static void cleanupWorld(Engine &ctx)
     }
   }
 
+  { // Destroy NPCs
+    Entity *npcs = state_mgr->getWorldEntities<NPC>(
+        ctx.worldID().idx);
+    for (uint32_t i = 0; i < ctx.data().numNPCs; ++i) {
+      ctx.destroyEntity(npcs[i]);
+    }
+  }
+
   { // Destroy asks
     auto [asks, num_asks] = state_mgr->getWorldComponentsAndCount<
       Ask, OrderInfo>(ctx.worldID().idx);
@@ -109,7 +120,9 @@ static void cleanupWorld(Engine &ctx)
 static void initWorld(Engine &ctx)
 {
   uint32_t num_agents = ctx.data().numAgents;
+  uint32_t num_npcs = ctx.data().numNPCs;
 
+  // Initialize agents
   for (uint32_t i = 0; i < num_agents; ++i) {
     Entity a = ctx.makeEntity<Agent>();
 
@@ -136,6 +149,40 @@ static void initWorld(Engine &ctx)
     };
 
     FullObservation &all_obs = ctx.get<FullObservation>(a);
+    memset(&all_obs, 0, sizeof(FullObservation));
+  }
+
+  // Initialize NPCs
+  for (uint32_t i = 0; i < num_npcs; ++i) {
+    Entity n = ctx.makeEntity<NPC>();
+
+    // Generate random secret number between 0 and D-1
+    int32_t secret_number = ctx.data().rng.sampleI32(0, ctx.data().D - 1);
+
+    ctx.get<NPCState>(n) = {
+      .position = 10,
+      .dollars = 1000,
+      .secretNumber = secret_number,
+      .positionIfAsksFilled = 10,
+      .dollarsIfBidsFilled = 1000,
+      .prevAsk = Entity::none(),
+      .prevBid = Entity::none(),
+    };
+
+    ctx.get<NPCOrder>(n) = {
+      .type = OrderType::None,
+      .info = {}
+    };
+
+    ctx.get<Reward>(n) = {
+      .v = 0.f
+    };
+
+    ctx.get<Done>(n) = {
+      .done = 0
+    };
+
+    FullObservation &all_obs = ctx.get<FullObservation>(n);
     memset(&all_obs, 0, sizeof(FullObservation));
   }
 
@@ -206,9 +253,10 @@ inline void actionsSystem(Engine &ctx,
     .issuer = e,
   };
 
-  printf("Agent (%d) placed order (%s); price = %d; size = %d\n",
+  printf("Agent %d (entity %d) placed order (%s); price = %d; size = %d\n",
       ctx.loc(e).row,
-      action.type == OrderType::Ask ? "ask" : "bid",
+      e.id,
+      action.type == OrderType::Ask ? "ask" : (action.type == OrderType::Bid ? "bid" : "hold"),
       order.info.price,
       order.info.size);
 }
@@ -225,9 +273,13 @@ struct StepStats {
 struct WorldState {
   uint32_t numPlayerOrders;
   PlayerOrder *playerOrders;
+  uint32_t numNPCOrders;
+  NPCOrder *npcOrders;
 
   uint32_t numPlayers;
   PlayerState *playerStates;
+  uint32_t numNPCs;
+  NPCState *npcStates;
 
   struct {
     uint32_t numAsks;
@@ -244,8 +296,8 @@ struct WorldState {
     // These are orders which could never be traded against.
     // We keep these in case there are no trades in the global
     // book.
-    OrderInfo dummyAsk { kMaxPrice, 0, Entity::none() };
-    OrderInfo dummyBid { 0, 0, Entity::none() };
+    OrderInfo dummyAsk;
+    OrderInfo dummyBid;
   } globalBook;
 
   StepStats stepStats;
@@ -286,31 +338,52 @@ struct WorldState {
     }
   }
 
-  // TODO: Find better name
-  void updateWorldState(Engine &ctx)
+  // Clean up orders with zero size from the global book
+  void cleanupZeroSizeOrders(Engine &ctx)
   {
-    while (true) {
-      OrderInfo &lowest_ask = getLowestAsk();
+    printf("Global book has %d asks (offset = %d) and %d bids (offset = %d)\n", globalBook.numAsks, globalBook.curAskOffset, globalBook.numBids, globalBook.curBidOffset);
 
-      if (lowest_ask.size == 0 && lowest_ask.price != kMaxPrice && lowest_ask.issuer != Entity::none()) {
-        ctx.destroyEntity(lowest_ask.issuer);
+    // Clean up zero-size asks
+    while (globalBook.curAskOffset < globalBook.numAsks) {
+      OrderInfo &ask = getLowestAsk();
+      Entity ask_handle = getLowestAskHandle();
+      
+      // Break if we hit a valid ask or the dummy ask
+      if (ask.price == kMaxPrice || ask_handle == Entity::none()) {
+        break;
+      }
+
+      // If the ask has zero size, destroy it and move to next
+      if (ask.size == 0) {
+        ctx.destroyEntity(ask_handle);
+        printf("Destroyed zero-size ask from global book issued by agent %d\n", ctx.loc(ask.issuer).row);
         globalBook.curAskOffset++;
       } else {
         break;
       }
     }
 
-    while (true) {
-      OrderInfo &highest_bid = getHighestBid();
+    // Clean up zero-size bids
+    while (globalBook.curBidOffset < globalBook.numBids) {
+      OrderInfo &bid = getHighestBid();
+      Entity bid_handle = getHighestBidHandle();
+      
+      // Break if we hit a valid bid or the dummy bid
+      if (bid.price == 0 || bid_handle == Entity::none()) {
+        break;
+      }
 
-      if (highest_bid.size == 0 && highest_bid.price != 0 && highest_bid.issuer != Entity::none()) {
-        ctx.destroyEntity(highest_bid.issuer);
+      // If the bid has zero size, destroy it and move to next
+      if (bid.size == 0) {
+        ctx.destroyEntity(bid_handle);
+        printf("Destroyed zero-size bid from global book issued by agent %d\n", ctx.loc(bid.issuer).row);
         globalBook.curBidOffset++;
       } else {
         break;
       }
     }
   }
+
 
   Entity addOrder(Engine &ctx,
                 PlayerOrder order)
@@ -348,11 +421,6 @@ static WorldState getWorldState(Engine &ctx)
 {
   (void)ctx;
 
-  // TODO: Provide a nicer unified API in the state manager to
-  // get a pointer to the components of an archetype in a single world.
-  //
-  // On the GPU backend, that means internally fetching the world offset
-  // instead of manually adding it yourself.
 #ifdef MADRONA_GPU_MODE
   StateManager *state_mgr = mwGPU::getStateManager();
 #else
@@ -364,6 +432,12 @@ static WorldState getWorldState(Engine &ctx)
 
   auto [player_states, num_player_states] = state_mgr->getWorldComponentsAndCount<
     Agent, PlayerState>(ctx.worldID().idx);
+
+  auto [npc_orders, num_npc_orders] = state_mgr->getWorldComponentsAndCount<
+    NPC, NPCOrder>(ctx.worldID().idx);
+
+  auto [npc_states, num_npcs] = state_mgr->getWorldComponentsAndCount<
+    NPC, NPCState>(ctx.worldID().idx);
 
   auto [asks, num_asks] = state_mgr->getWorldComponentsAndCount<
     Ask, OrderInfo>(ctx.worldID().idx);
@@ -379,9 +453,13 @@ static WorldState getWorldState(Engine &ctx)
     // Current orders
     num_player_orders,
     player_orders,
+    num_npc_orders,
+    npc_orders,
 
     num_player_states,
     player_states,
+    num_npcs,
+    npc_states,
 
     { // Global book info
       num_asks,
@@ -480,6 +558,49 @@ static bool executeTrade(OrderInfo &ask,
   return (traded_quantity > 0);
 }
 
+inline void npcSystem(Engine &ctx,
+                     Entity e,
+                     NPCState &npc_state)
+{
+  // Generate random price between 0 and N * (D-1)
+  uint32_t max_price = ctx.data().numAgents * (ctx.data().D - 1);
+  uint32_t quote_price = ctx.data().rng.sampleI32(0, max_price);
+
+  // Store the quote price in the NPC's state
+  npc_state.currentQuotePrice = quote_price;
+
+  printf("[npcSystem] NPC %d (entity %d) quotes price: %d\n", 
+         ctx.loc(e).row, e.id, quote_price);
+
+  // Create two orders in the global book - one ask and one bid at the quote price
+  // with effectively infinite size
+  WorldState world_state = getWorldState(ctx);
+
+  // Add an ask at the quote price (players can buy at this price)
+  PlayerOrder ask_order = {
+    .type = OrderType::Ask,
+    .info = {
+      .price = quote_price,
+      .size = 1000000,  // Large number to represent "infinite" liquidity
+      .issuer = e,
+    }
+  };
+  Entity ask = world_state.addOrder(ctx, ask_order);
+  npc_state.prevAsk = ask;
+
+  // Add a bid at the quote price (players can sell at this price)
+  PlayerOrder bid_order = {
+    .type = OrderType::Bid,
+    .info = {
+      .price = quote_price,
+      .size = 1000000,  // Large number to represent "infinite" liquidity
+      .issuer = e,
+    }
+  };
+  Entity bid = world_state.addOrder(ctx, bid_order);
+  npc_state.prevBid = bid;
+}
+
 inline void matchSystem(Engine &ctx,
                         Market &market)
 {
@@ -500,8 +621,12 @@ inline void matchSystem(Engine &ctx,
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
     PlayerState &i_state = world_state.playerStates[i_agent_idx];
 
-    printf("\n[i loop] Agent (%d) has order (%s; price=%d; size=%d)\n", i_agent_idx, i_order.type == OrderType::Ask ? "ask" : "bid", i_order.info.price, i_order.info.size);
-    // printf("Current state of agent (%d): dollars = %d; position = %d; dollarsIfBidsFilled = %d; positionIfAsksFilled = %d\n", i_agent_idx, i_state.dollars, i_state.position, i_state.dollarsIfBidsFilled, i_state.positionIfAsksFilled);
+    printf("\n[i loop] Agent (%d) has order (%s; price=%d; size=%d)\n", 
+        i_agent_idx, 
+        i_order.type == OrderType::Ask ? "ask" : (i_order.type == OrderType::Bid ? "bid" : "hold"), 
+        i_order.info.price, 
+        i_order.info.size
+    );
 
     if (ctx.data().simFlags == SimFlags::InterpretAddAsReplace) {
       // Handle replacement mode - cancel any existing orders first
@@ -615,7 +740,7 @@ inline void matchSystem(Engine &ctx,
                        i_state, issuer_state, world_state.stepStats, false);
 
           // Makes sure to clean up the global 
-          world_state.updateWorldState(ctx);
+          world_state.cleanupZeroSizeOrders(ctx);
           didExecute = true;
         } else {
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
@@ -645,7 +770,7 @@ inline void matchSystem(Engine &ctx,
                        issuer_state, i_state, world_state.stepStats, true);
 
           // Makes sure to clean up the global 
-          world_state.updateWorldState(ctx);
+          world_state.cleanupZeroSizeOrders(ctx);
           didExecute = true;
         } else {
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
@@ -806,19 +931,28 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
       PlayerOrder
     >>({});
 
+  // Add NPC system before match system
+  node = builder.addToGraph<ParallelForNode<Engine,
+    npcSystem,
+      Entity,
+      NPCState
+    >>({node});
+
   node = builder.addToGraph<ParallelForNode<Engine,
     matchSystem,
       Market
     >>({node});
 
-  node = builder.addToGraph<SortArchetypeNode<
-    Ask, PriceKey>>({node});
+  // First compact the archetypes to remove destroyed entities
   node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
-
-  node = builder.addToGraph<SortArchetypeNode<
-    Bid, PriceKey>>({node});
   node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
   node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
+
+  // Then sort the compacted archetypes
+  node = builder.addToGraph<SortArchetypeNode<
+    Ask, PriceKey>>({node});
+  node = builder.addToGraph<SortArchetypeNode<
+    Bid, PriceKey>>({node});
 
   node = builder.addToGraph<ParallelForNode<Engine,
     rewardSystem,
@@ -848,7 +982,9 @@ Sim::Sim(Engine &ctx,
     : WorldBase(ctx),
       numAgents(cfg.numAgents),
       simFlags(cfg.simFlags),
-      settlementPrice(cfg.settlementPrice)
+      settlementPrice(cfg.settlementPrice),
+      numNPCs(cfg.numNPCs),
+      D(cfg.D)
 {
   rewardHyperParams = cfg.rewardHyperParamsBuffer;
   initRandKey = cfg.initRandKey;

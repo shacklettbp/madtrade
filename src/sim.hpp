@@ -145,6 +145,32 @@ struct FullObservation {
   TimeStepObservation obs[OBSERVATION_HISTORY_LEN];
 };
 
+struct NPCState {
+  int32_t position;
+  int32_t dollars;
+  int32_t secretNumber;  // The secret number this NPC sees
+  int32_t positionIfAsksFilled;
+  int32_t dollarsIfBidsFilled;
+  madrona::Entity prevAsk;
+  madrona::Entity prevBid;
+  uint32_t currentQuotePrice;  // Current price quote offered by this NPC
+};
+
+struct NPCOrder {
+  OrderType type;
+  OrderInfo info;
+};
+
+struct NPC : madrona::Archetype<
+  NPCState,
+  NPCOrder,
+  FullObservation,
+  Action,
+  Reward,
+  Done,
+  AgentPolicy
+> {};
+
 struct Agent : madrona::Archetype<
   PlayerState,
   PlayerOrder,
@@ -163,6 +189,8 @@ struct TaskConfig {
   RewardHyperParams *rewardHyperParamsBuffer;
   madrona::RandKey initRandKey;
   uint32_t numAgents;
+  uint32_t numNPCs;  // Number of NPCs per world
+  uint32_t D;        // Range of secret numbers (0 to D-1)
   SimFlags simFlags;
   uint32_t settlementPrice;
 };
@@ -202,6 +230,8 @@ struct Sim : public madrona::WorldBase {
   uint32_t numAgents;
   SimFlags simFlags;
   uint32_t settlementPrice;
+  uint32_t numNPCs;
+  uint32_t D;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

@@ -276,6 +276,8 @@ Manager::Impl * Manager::Impl::init(
     // Temporarily just setting the seed to 0
     .initRandKey = rand::initKey(0),
     .numAgents = mgr_cfg.numAgentsPerWorld,
+    .numNPCs = mgr_cfg.numNPCsPerWorld,
+    .D = mgr_cfg.D,
     .simFlags = mgr_cfg.simFlags,
     .settlementPrice = mgr_cfg.settlementPrice
   };
