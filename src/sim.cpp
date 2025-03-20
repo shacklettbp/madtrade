@@ -421,6 +421,11 @@ static WorldState getWorldState(Engine &ctx)
 {
   (void)ctx;
 
+  // TODO: Provide a nicer unified API in the state manager to
+  // get a pointer to the components of an archetype in a single world.
+  //
+  // On the GPU backend, that means internally fetching the world offset
+  // instead of manually adding it yourself.
 #ifdef MADRONA_GPU_MODE
   StateManager *state_mgr = mwGPU::getStateManager();
 #else
