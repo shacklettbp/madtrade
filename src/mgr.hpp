@@ -23,6 +23,8 @@ public:
     int gpuID; // Which GPU for CUDA backend?
     uint32_t numWorlds; // Simulation batch size
     uint32_t numAgentsPerWorld;
+    uint32_t numNPCsPerWorld;  // Number of NPCs per world
+    uint32_t D;                // Range of secret numbers (0 to D-1)
     uint32_t settlementPrice;
     SimFlags simFlags;
     uint32_t numPBTPolicies;

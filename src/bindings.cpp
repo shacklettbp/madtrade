@@ -22,6 +22,8 @@ NB_MODULE(mad_trade, m) {
                             int64_t gpu_id,
                             int64_t num_worlds,
                             int64_t num_agents_per_world,
+                            int64_t num_npcs_per_world,
+                            int64_t D,
                             uint32_t settlement_price,
                             uint32_t sim_flags,
                             uint32_t num_pbt_policies) {
@@ -30,6 +32,8 @@ NB_MODULE(mad_trade, m) {
                 .gpuID = (int)gpu_id,
                 .numWorlds = (uint32_t)num_worlds,
                 .numAgentsPerWorld = (uint32_t)num_agents_per_world,
+                .numNPCsPerWorld = (uint32_t)num_npcs_per_world,
+                .D = (uint32_t)D,
                 .settlementPrice = settlement_price,
                 .simFlags = SimFlags(sim_flags),
                 .numPBTPolicies = num_pbt_policies,
@@ -38,6 +42,8 @@ NB_MODULE(mad_trade, m) {
            nb::arg("gpu_id"),
            nb::arg("num_worlds"),
            nb::arg("num_agents_per_world"),
+           nb::arg("num_npcs_per_world"),
+           nb::arg("D"),
            nb::arg("settlement_price"),
            nb::arg("sim_flags"),
            nb::arg("num_pbt_policies"))
