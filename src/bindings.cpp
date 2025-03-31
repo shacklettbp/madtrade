@@ -14,6 +14,7 @@ NB_MODULE(mad_trade, m) {
     nb::enum_<SimFlags>(m, "SimFlags", nb::is_arithmetic())
       .value("Default", SimFlags::Default)
       .value("AutoReset", SimFlags::AutoReset)
+      .value("InterpretAddAsReplace", SimFlags::InterpretAddAsReplace)
     ;
 
     nb::class_<Manager> (m, "SimManager")
