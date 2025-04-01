@@ -4,12 +4,14 @@ To build this repo:
 
 ```
 pip install --upgrade "jax[cuda12_local]"
+# Remember "--recursive"! Make Brennan happy.
 git clone --recursive git@github.com:shacklettbp/madrona-learn.git
 cd madrona-learn
 pip install -e .
 
 cd ..
 
+# Remember "--recursive"!
 git clone --recursive git@github.com:shacklettbp/madtrade.git
 cd madtrade
 
