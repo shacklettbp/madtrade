@@ -34,6 +34,8 @@ arg_parser.add_argument('--restore', type=int)
 
 arg_parser.add_argument('--num-worlds', type=int, required=True)
 arg_parser.add_argument('--num-agents', type=int, required=True)
+arg_parser.add_argument('--num-npcs', type=int, required=True)
+arg_parser.add_argument('--settlement-price', type=int, required=True)
 arg_parser.add_argument('--num-updates', type=int, required=True)
 arg_parser.add_argument('--steps-per-update', type=int, default=50)
 arg_parser.add_argument('--num-bptt-chunks', type=int, default=1)
@@ -59,7 +61,7 @@ arg_parser.add_argument('--curriculum-data', type=str)
 
 args = arg_parser.parse_args()
 
-sim_flags = SimFlags.AutoReset
+sim_flags = SimFlags.InterpretAddAsReplace
 
 tb_writer = TensorboardWriter(os.path.join(args.tb_dir, args.run_name))
 
@@ -68,6 +70,9 @@ sim = mad_trade.SimManager(
     gpu_id = args.gpu_id,
     num_worlds = args.num_worlds,
     num_agents_per_world = args.num_agents,
+    num_npcs_per_world = args.num_npcs,
+    D = 10,
+    settlement_price = args.settlement_price,
     sim_flags = sim_flags,
     num_pbt_policies = args.pbt_ensemble_size + args.pbt_past_policies,
 )
@@ -137,7 +142,7 @@ cfg = TrainConfig(
     gae_lambda = 0.95,
     algo = PPOConfig(
         num_epochs = 2,
-        num_mini_batches = args.num_minibatches,
+        minibatch_size = args.num_minibatches,
         clip_coef = 0.2,
         #value_loss_coef = args.value_loss_coef,
         value_loss_coef = 0.5,

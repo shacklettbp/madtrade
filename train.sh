@@ -19,6 +19,8 @@ XLA_PYTHON_CLIENT_PREALLOCATE=false MADRONA_LEARN_DUMP_LOWERED=/tmp/lowered MADR
     --num-updates 1000000 \
     --num-worlds 4096 \
     --num-agents 4 \
+    --num-npcs 1 \
+    --settlement-price 100 \
     --lr 1e-4 \
     --steps-per-update 40 \
     --num-bptt-chunks 2 \
