@@ -38,8 +38,7 @@ actions_config = {
 
 def process_obs_for_mlp(obs, train=False):
     return jnp.concatenate([
-        obs['orders'].reshape(*obs['orders'].shape[:-2], -1),
-        obs['position'],
+        obs['obs'].reshape(*obs['obs'].shape[:-2], -1),
     ], axis=-1)
 
 

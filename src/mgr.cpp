@@ -467,7 +467,6 @@ TrainInterface Manager::trainInterface() const
 {
   auto pbt_inputs = std::to_array<NamedTensor>({
     { "policy_assignments", policyAssignmentTensor() },
-    { "reward_hyper_params", rewardHyperParamsTensor() },
   });
 
   return TrainInterface {

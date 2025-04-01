@@ -146,7 +146,9 @@ cfg = TrainConfig(
         clip_coef = 0.2,
         #value_loss_coef = args.value_loss_coef,
         value_loss_coef = 0.5,
-        entropy_coef = entropy_coef,
+        entropy_coef = {
+            'buy_sell': entropy_coef,
+        },
         max_grad_norm = 5.0,
         clip_value_loss = args.clip_value_loss,
         huber_value_loss = True,
