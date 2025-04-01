@@ -88,14 +88,23 @@ struct Manager::CPUImpl final : Manager::Impl {
   }
 
 #ifdef MADRONA_CUDA_SUPPORT
-  virtual void gpuStreamInit(cudaStream_t, void **)
+  virtual void gpuStreamInit(cudaStream_t strm, void **buffers)
   {
-    assert(false);
+    REQ_CUDA(cudaStreamSynchronize(strm));
+
+    run(TaskGraphID::Init);
+
+    trainInterface.cudaCopyObservations(strm, buffers);
   }
 
-  virtual void gpuStreamStep(cudaStream_t, void **)
+  virtual void gpuStreamStep(cudaStream_t strm, void **buffers)
   {
-    assert(false);
+    buffers = trainInterface.cudaCopyStepInputs(strm, buffers);
+    REQ_CUDA(cudaStreamSynchronize(strm));
+
+    run(TaskGraphID::Step);
+
+    trainInterface.cudaCopyStepOutputs(strm, buffers);
   }
 #endif
 
