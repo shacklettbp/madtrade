@@ -181,9 +181,6 @@ static void initWorld(Engine &ctx)
     ctx.get<Done>(n) = {
       .done = 0
     };
-
-    FullObservation &all_obs = ctx.get<FullObservation>(n);
-    memset(&all_obs, 0, sizeof(FullObservation));
   }
 
   ctx.singleton<WorldReset>().reset = 0;
@@ -736,6 +733,13 @@ inline void matchSystem(Engine &ctx,
         if (best_trade_idx == -1) {
           OrderInfo &glob_bid = world_state.getHighestBid();
 
+          if (glob_bid.issuer == Entity::none()) {
+            printf("[Match Global] Agent %d's bid is not in the book\n", i_agent_idx);
+            break;
+          }
+
+          printf("[DEBUG] Issuer of glob_bid is %d, none entity is %d\n", glob_bid.issuer.id, Entity::none().id);
+
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
 
           printf("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
@@ -765,6 +769,11 @@ inline void matchSystem(Engine &ctx,
 
         if (best_trade_idx == -1) {
           OrderInfo &glob_ask = world_state.getLowestAsk();
+
+          if (glob_ask.issuer == Entity::none()) {
+            printf("[Match Global] Agent %d's ask is not in the book\n", i_agent_idx);
+            break;
+          }
 
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
 
