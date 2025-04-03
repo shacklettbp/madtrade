@@ -939,6 +939,7 @@ static void setupInitTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
   node = builder.addToGraph<SortArchetypeNode<
     Bid, PriceKey>>({node});
   node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
+
   node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
 
   resetAndObsTasks(builder, cfg, {node});
@@ -965,6 +966,9 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
       Market
     >>({node});
 
+  node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
+  node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
+
   node = builder.addToGraph<SortArchetypeNode<
     Ask, PriceKey>>({node});
   node = builder.addToGraph<SortArchetypeNode<
@@ -972,7 +976,6 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
 
   node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
   node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
-  node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
 
   node = builder.addToGraph<ParallelForNode<Engine,
     rewardSystem,
