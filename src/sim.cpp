@@ -11,6 +11,14 @@
 #include <madrona/state.hpp>
 #endif
 
+//#define ENABLE_LOGGING
+
+#ifdef ENABLE_LOGGING
+#define LOG(...) printf(__VA_ARGS__)
+#else
+#define LOG(...)
+#endif
+
 using namespace madrona;
 using namespace madrona::math;
 
@@ -250,7 +258,7 @@ inline void actionsSystem(Engine &ctx,
     .issuer = e,
   };
 
-  printf("Agent %d (entity %d) placed order (%s); price = %d; size = %d\n",
+  LOG("Agent %d (entity %d) placed order (%s); price = %d; size = %d\n",
       ctx.loc(e).row,
       e.id,
       action.type == OrderType::Ask ? "ask" : (action.type == OrderType::Bid ? "bid" : "hold"),
@@ -338,7 +346,7 @@ struct WorldState {
   // Clean up orders with zero size from the global book
   void cleanupZeroSizeOrders(Engine &ctx)
   {
-    printf("Global book has %d asks (offset = %d) and %d bids (offset = %d)\n", globalBook.numAsks, globalBook.curAskOffset, globalBook.numBids, globalBook.curBidOffset);
+    LOG("Global book has %d asks (offset = %d) and %d bids (offset = %d)\n", globalBook.numAsks, globalBook.curAskOffset, globalBook.numBids, globalBook.curBidOffset);
 
     // Clean up zero-size asks
     while (globalBook.curAskOffset < globalBook.numAsks) {
@@ -353,7 +361,7 @@ struct WorldState {
       // If the ask has zero size, destroy it and move to next
       if (ask.size == 0) {
         ctx.destroyEntity(ask_handle);
-        printf("Destroyed zero-size ask from global book issued by agent %d\n", ctx.loc(ask.issuer).row);
+        LOG("Destroyed zero-size ask from global book issued by agent %d\n", ctx.loc(ask.issuer).row);
         globalBook.curAskOffset++;
       } else {
         break;
@@ -373,7 +381,7 @@ struct WorldState {
       // If the bid has zero size, destroy it and move to next
       if (bid.size == 0) {
         ctx.destroyEntity(bid_handle);
-        printf("Destroyed zero-size bid from global book issued by agent %d\n", ctx.loc(bid.issuer).row);
+        LOG("Destroyed zero-size bid from global book issued by agent %d\n", ctx.loc(bid.issuer).row);
         globalBook.curBidOffset++;
       } else {
         break;
@@ -571,7 +579,7 @@ inline void npcSystem(Engine &ctx,
   // Store the quote price in the NPC's state
   npc_state.currentQuotePrice = quote_price;
 
-  printf("[npcSystem] NPC %d (entity %d) quotes price: %d\n", 
+  LOG("[npcSystem] NPC %d (entity %d) quotes price: %d\n", 
          ctx.loc(e).row, e.id, quote_price);
 
   // Create two orders in the global book - one ask and one bid at the quote price
@@ -623,7 +631,7 @@ inline void matchSystem(Engine &ctx,
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
     PlayerState &i_state = world_state.playerStates[i_agent_idx];
 
-    printf("\n[i loop] Agent (%d) has order (%s; price=%d; size=%d)\n", 
+    LOG("\n[i loop] Agent (%d) has order (%s; price=%d; size=%d)\n", 
         i_agent_idx, 
         i_order.type == OrderType::Ask ? "ask" : (i_order.type == OrderType::Bid ? "bid" : "hold"), 
         i_order.info.price, 
@@ -634,7 +642,7 @@ inline void matchSystem(Engine &ctx,
       // Handle replacement mode - cancel any existing orders first
       if (i_order.type == OrderType::Ask) {
         if (i_state.prevAsk != Entity::none()) {
-            printf("[AddAsReplace] Cancelling agent %d's previous ask\n", i_agent_idx);
+            LOG("[AddAsReplace] Cancelling agent %d's previous ask\n", i_agent_idx);
           // Get the previous ask order info
           OrderInfo &prev_order_info = ctx.get<OrderInfo>(i_state.prevAsk);
           
@@ -647,7 +655,7 @@ inline void matchSystem(Engine &ctx,
         }
       } else if (i_order.type == OrderType::Bid) {
         if (i_state.prevBid != Entity::none()) {
-            printf("[AddAsReplace] Cancelling agent %d's previous bid\n", i_agent_idx);
+            LOG("[AddAsReplace] Cancelling agent %d's previous bid\n", i_agent_idx);
           // Get the previous bid order info
           OrderInfo &prev_order_info = ctx.get<OrderInfo>(i_state.prevBid);
           
@@ -667,7 +675,7 @@ inline void matchSystem(Engine &ctx,
     // Validate if order can be executed
     if (i_order.type == OrderType::Bid) {
       if (i_order.info.size * i_order.info.price > (int64_t)i_state.dollarsIfBidsFilled) {
-        printf("[Invalid] Agent %d's bid is too large: %d * %d > %d\n", i_agent_idx, i_order.info.size, i_order.info.price, i_state.dollarsIfBidsFilled);
+        LOG("[Invalid] Agent %d's bid is too large: %d * %d > %d\n", i_agent_idx, i_order.info.size, i_order.info.price, i_state.dollarsIfBidsFilled);
         i_order.info.size = 0;
         continue;
       }
@@ -675,7 +683,7 @@ inline void matchSystem(Engine &ctx,
       i_state.dollarsIfBidsFilled -= i_order.info.size * i_order.info.price;
     } else if (i_order.type == OrderType::Ask) {
       if (i_order.info.size > i_state.positionIfAsksFilled) {
-        printf("[Invalid] Agent %d's ask is too large: %d > %d\n", i_agent_idx, i_order.info.size, i_state.positionIfAsksFilled);
+        LOG("[Invalid] Agent %d's ask is too large: %d > %d\n", i_agent_idx, i_order.info.size, i_state.positionIfAsksFilled);
         i_order.info.size = 0;
         continue;
       }
@@ -695,26 +703,26 @@ inline void matchSystem(Engine &ctx,
         PlayerOrder &j_order = world_state.playerOrders[j_agent_idx];
 
         if (i_order.type == j_order.type) {
-          printf("[Skip] Agents %d and %d have orders of same type (%s), skipping\n",
+          LOG("[Skip] Agents %d and %d have orders of same type (%s), skipping\n",
                  i_agent_idx, j_agent_idx,
                  j_order.type == OrderType::Ask ? "ask" : "bid");
           continue;
         }
 
         if (j_order.info.size == 0) {
-            printf("[Skip] Agent %d has order of size 0, skipping\n", j_agent_idx);
+            LOG("[Skip] Agent %d has order of size 0, skipping\n", j_agent_idx);
             continue;
         }
 
         if (j_order.type == OrderType::Ask) {
           if (j_order.info.price < best_price) {
-            // printf("[best_trade_idx] Agent %d's ask is better than current best price: %d < %d\n", j_agent_idx, j_order.info.price, best_price);
+            // LOG("[best_trade_idx] Agent %d's ask is better than current best price: %d < %d\n", j_agent_idx, j_order.info.price, best_price);
             best_trade_idx = j_agent_idx;
             best_price = j_order.info.price;
           }
         } else if (j_order.type == OrderType::Bid) {
           if (j_order.info.price > best_price) {
-            // printf("[best_trade_idx] Agent %d's bid is better than current best price: %d > %d\n", j_agent_idx, j_order.info.price, best_price);
+            // LOG("[best_trade_idx] Agent %d's bid is better than current best price: %d > %d\n", j_agent_idx, j_order.info.price, best_price);
             best_trade_idx = j_agent_idx;
             best_price = j_order.info.price;
           }
@@ -723,7 +731,7 @@ inline void matchSystem(Engine &ctx,
         }
       }
 
-    //   printf("[best_trade_idx] best_trade_idx = %d (best_price = %d)\n", best_trade_idx, best_price);
+    //   LOG("[best_trade_idx] best_trade_idx = %d (best_price = %d)\n", best_trade_idx, best_price);
 
       if (i_order.type == OrderType::Ask) {
         if (best_price < i_order.info.price) {
@@ -734,15 +742,15 @@ inline void matchSystem(Engine &ctx,
           OrderInfo &glob_bid = world_state.getHighestBid();
 
           if (glob_bid.issuer == Entity::none()) {
-            printf("[Match Global] Agent %d's bid is not in the book\n", i_agent_idx);
+            LOG("[Match Global] Agent %d's bid is not in the book\n", i_agent_idx);
             break;
           }
 
-          printf("[DEBUG] Issuer of glob_bid is %d, none entity is %d\n", glob_bid.issuer.id, Entity::none().id);
+          LOG("[DEBUG] Issuer of glob_bid is %d, none entity is %d\n", glob_bid.issuer.id, Entity::none().id);
 
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_bid.issuer);
 
-          printf("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+          LOG("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
                  ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
 
           executeTrade(i_order.info, glob_bid,
@@ -755,7 +763,7 @@ inline void matchSystem(Engine &ctx,
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
           PlayerState &other_state = world_state.playerStates[best_trade_idx];
 
-          printf("[Match] Agent %d asking with agent %d's bid of (price = %d; size = %d)\n",
+          LOG("[Match] Agent %d asking with agent %d's bid of (price = %d; size = %d)\n",
                  i_agent_idx, best_trade_idx, other_order.info.price, other_order.info.size);
 
           executeTrade(i_order.info, other_order.info,
@@ -771,13 +779,13 @@ inline void matchSystem(Engine &ctx,
           OrderInfo &glob_ask = world_state.getLowestAsk();
 
           if (glob_ask.issuer == Entity::none()) {
-            printf("[Match Global] Agent %d's ask is not in the book\n", i_agent_idx);
+            LOG("[Match Global] Agent %d's ask is not in the book\n", i_agent_idx);
             break;
           }
 
           PlayerState &issuer_state = ctx.get<PlayerState>(glob_ask.issuer);
 
-          printf("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
+          LOG("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
                  i_agent_idx, ctx.loc(glob_ask.issuer).row, glob_ask.price, glob_ask.size);
 
           executeTrade(glob_ask, i_order.info,
@@ -790,7 +798,7 @@ inline void matchSystem(Engine &ctx,
           PlayerOrder &other_order = world_state.playerOrders[best_trade_idx];
           PlayerState &other_state = world_state.playerStates[best_trade_idx];
 
-          printf("[Match] Agent %d bidding with agent %d's ask of (price = %d; size = %d)\n",
+          LOG("[Match] Agent %d bidding with agent %d's ask of (price = %d; size = %d)\n",
                  i_agent_idx, best_trade_idx, other_order.info.price, other_order.info.size);
 
           executeTrade(other_order.info, i_order.info,
@@ -803,11 +811,11 @@ inline void matchSystem(Engine &ctx,
     }
 
     if (!didExecute) {
-      printf("[No match] Agent %d's order was not executed\n", i_agent_idx);
+      LOG("[No match] Agent %d's order was not executed\n", i_agent_idx);
     }
   }
 
-  printf("\n[matchSystem] Done with i loop\n\n");
+  LOG("\n[matchSystem] Done with i loop\n\n");
 
   // After going through all orders, add any remaining orders to the global book
   for (uint32_t i = 0; i < world_state.numPlayerOrders; ++i) {
@@ -817,7 +825,7 @@ inline void matchSystem(Engine &ctx,
 
     // If the order still has stuff in it, push it to the end of the global book
     if (i_order.info.size > 0) {
-      printf("[Remaining] Adding agent %d's order to the global book (type=%s; price=%d; size=%d)\n", 
+      LOG("[Remaining] Adding agent %d's order to the global book (type=%s; price=%d; size=%d)\n", 
           i_agent_idx,
           i_order.type == OrderType::Ask ? "ask" : "bid",
           i_order.info.price,
