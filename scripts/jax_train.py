@@ -267,12 +267,10 @@ def train():
     last_time = time()
 
     for i in range(num_outer_iters):
-        err, training_mgr = update_loop_compiled(training_mgr)
-        err.throw()
+        training_mgr = update_loop_compiled(training_mgr)
 
         if args.pbt_ensemble_size > 1:
-            err, training_mgr = update_population_compiled(training_mgr)
-            err.throw()
+            training_mgr = update_population_compiled(training_mgr)
 
         print(training_mgr.state.policy_states.mmr.elo)
 

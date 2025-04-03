@@ -965,16 +965,14 @@ static void setupStepTasks(TaskGraphBuilder &builder, const TaskConfig &cfg)
       Market
     >>({node});
 
-  // First compact the archetypes to remove destroyed entities
-  node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
-  node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
-  node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
-
-  // Then sort the compacted archetypes
   node = builder.addToGraph<SortArchetypeNode<
     Ask, PriceKey>>({node});
   node = builder.addToGraph<SortArchetypeNode<
     Bid, PriceKey>>({node});
+
+  node = builder.addToGraph<CompactArchetypeNode<Ask>>({node});
+  node = builder.addToGraph<CompactArchetypeNode<Bid>>({node});
+  node = builder.addToGraph<CompactArchetypeNode<Agent>>({node});
 
   node = builder.addToGraph<ParallelForNode<Engine,
     rewardSystem,
