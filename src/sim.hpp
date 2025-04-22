@@ -232,6 +232,8 @@ struct Sim : public madrona::WorldBase {
   uint32_t settlementPrice;
   uint32_t numNPCs;
   uint32_t D;
+
+  uint32_t stepCount;
 };
 
 class Engine : public ::madrona::CustomContext<Engine, Sim> {

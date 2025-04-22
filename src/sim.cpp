@@ -201,6 +201,8 @@ inline void resetSystem(Engine &ctx, WorldReset &reset)
   if (force_reset != 0) {
     reset.reset = 0;
 
+    printf("Reset has happened\n");
+    ctx.data().stepCount = 0;
     cleanupWorld(ctx);
     initWorld(ctx);
   } 
@@ -626,6 +628,9 @@ inline void matchSystem(Engine &ctx,
       sizeof(uint32_t) * world_state.numPlayerOrders);
   genRandomPerm(ctx, rand_perm, world_state.numPlayerOrders);
 
+  uint32_t step_count = ctx.data().stepCount;
+  printf("step_count = %u\n", step_count);
+
   for (int32_t i = 0; i < (int32_t)world_state.numPlayerOrders; ++i) {
     uint32_t i_agent_idx = rand_perm[i];
     PlayerOrder &i_order = world_state.playerOrders[i_agent_idx];
@@ -753,8 +758,10 @@ inline void matchSystem(Engine &ctx,
           LOG("[Match Global] Agent %d bidding with agent %d's ask of (price = %d; size = %d) from global book\n",
                  ctx.loc(glob_bid.issuer).row, i_agent_idx, i_order.info.price, i_order.info.size);
 
-          executeTrade(i_order.info, glob_bid,
-                       i_state, issuer_state, world_state.stepStats, false);
+          if (!executeTrade(i_order.info, glob_bid,
+                       i_state, issuer_state, world_state.stepStats, false)) {
+            break;
+          }
 
           // Makes sure to clean up the global 
           world_state.cleanupZeroSizeOrders(ctx);
@@ -1007,7 +1014,8 @@ Sim::Sim(Engine &ctx,
       simFlags(cfg.simFlags),
       settlementPrice(cfg.settlementPrice),
       numNPCs(cfg.numNPCs),
-      D(cfg.D)
+      D(cfg.D),
+      stepCount(0)
 {
   rewardHyperParams = cfg.rewardHyperParamsBuffer;
   initRandKey = cfg.initRandKey;
