@@ -89,9 +89,12 @@ if args.pbt_ensemble_size != 1 or args.pbt_past_policies != 0:
         team_size = 1,
         num_train_policies = args.pbt_ensemble_size,
         num_past_policies = args.pbt_past_policies,
-        self_play_portion = 0.75,
-        cross_play_portion = 0.125,
-        past_play_portion = 0.125,
+        # self_play_portion = 0.75,
+        # cross_play_portion = 0.125,
+        # past_play_portion = 0.125,
+        self_play_portion = 0.5,
+        cross_play_portion = 0.25,
+        past_play_portion = 0.25,
         reward_hyper_params_explore = {
             'some_param': ParamExplore(
                 base = 1.0,
@@ -112,7 +115,7 @@ else:
     dtype = jnp.float32
 
 
-if pbt_cfg:
+if False:
     lr = ParamExplore(
         base = args.lr,
         min_scale = 0.1,
@@ -203,15 +206,15 @@ def _log_metrics_host_cb(training_mgr):
 
         print()
 
-        elos = training_mgr.state.policy_states.mmr.elo
+        # elos = training_mgr.state.policy_states.mmr.elo
 
-        for i in range(elos.shape[0]):
-            tb_writer.scalar(f"p{i}/elo", elos[i], update_id)
+        # for i in range(elos.shape[0]):
+        #     tb_writer.scalar(f"p{i}/elo", elos[i], update_id)
 
-        num_train_policies = lrs.shape[0]
-        for i in range(lrs.shape[0]):
-            tb_writer.scalar(f"p{i}/lr", lrs[i], update_id)
-            tb_writer.scalar(f"p{i}/entropy_coef", entropy_coefs[i], update_id)
+        # num_train_policies = lrs.shape[0]
+        # for i in range(lrs.shape[0]):
+        #     tb_writer.scalar(f"p{i}/lr", lrs[i], update_id)
+        #     tb_writer.scalar(f"p{i}/entropy_coef", entropy_coefs[i], update_id)
 
     training_mgr.log_metrics_tensorboard(tb_writer)
 
@@ -222,6 +225,7 @@ def update_loop(training_mgr):
     assert args.eval_frequency % cfg.metrics_buffer_size == 0
 
     def inner_iter(i, training_mgr):
+        jax.debug.print("1")
         return training_mgr.update_iter()
 
     def outer_iter(i, training_mgr):
@@ -260,19 +264,19 @@ def train():
 
     update_loop_compiled = madrona_learn.aot_compile(update_loop, training_mgr)
 
-    if args.pbt_ensemble_size > 1:
-        update_population_compiled = madrona_learn.aot_compile(
-            update_population, training_mgr)
+    # if args.pbt_ensemble_size > 1:
+    #     update_population_compiled = madrona_learn.aot_compile(
+    #         update_population, training_mgr)
 
     last_time = time()
 
     for i in range(num_outer_iters):
         training_mgr = update_loop_compiled(training_mgr)
 
-        if args.pbt_ensemble_size > 1:
-            training_mgr = update_population_compiled(training_mgr)
+        # if args.pbt_ensemble_size > 1:
+        #     training_mgr = update_population_compiled(training_mgr)
 
-        print(training_mgr.state.policy_states.mmr.elo)
+        # print(training_mgr.state.policy_states.mmr.elo)
 
         training_mgr.save_ckpt(f"{args.ckpt_dir}/{args.run_name}")
     
